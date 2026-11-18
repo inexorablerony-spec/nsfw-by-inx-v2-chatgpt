@@ -78,7 +78,7 @@
     <string name="btn_close">Mdel</string>
     <string name="action_comments">Iwenniten</string>
     <string name="action_save">Sekles</string>
-    <string name="app_name">Flow</string>
+    <string name="app_name">Goonhub by INX</string>
     <string name="subscriptions_search_placeholder">Nadi Isugen...</string>
     <string name="subscriptions_sort_label">Ceggɛet tisɣenwalin</string>
     <string name="subscriptions_sort_default">Ur yelli ara deg umḍiq</string>
@@ -1917,7 +1917,7 @@
     <string name="onboarding_step_interests">Iɛǧeb-asen lḥal</string>
     <string name="onboarding_step_channels">Tiɣennanin</string>
     <string name="onboarding_step_import">Ewwet</string>
-    <string name="onboarding_import_source_flow">Flow</string>
+    <string name="onboarding_import_source_flow">Goonhub by INX</string>
     <string name="onboarding_import_source_youtube">YouTube</string>
     <string name="onboarding_import_footnote">D ayen akk i yellan dagi i d-yeffɣen. Isebtaren i sɛan azday ɣer \"Tameẓla\"</string>
     <string name="onboarding_import_done">Iɛedda-d</string>

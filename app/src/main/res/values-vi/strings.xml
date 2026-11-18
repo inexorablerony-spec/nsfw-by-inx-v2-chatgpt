@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Flow</string>
+    <string name="app_name">Goonhub by INX</string>
     <string name="subscriptions_search_placeholder">Tìm kênh đã đăng ký…</string>
     <string name="subscriptions_sort_label">Sắp xếp kênh</string>
     <string name="subscriptions_sort_default">Mặc định</string>
@@ -5061,7 +5061,7 @@
     <string name="ai_music_attribution_blocker_title">Danh sách nhạc bởi Spotify AI Blocker</string>
     <string name="ai_music_attribution_blocker_summary">MIT, © CennoxX</string>
     <string name="ai_list_source_title">Nguồn danh sách</string>
-    <string name="ai_list_source_default">Flow</string>
+    <string name="ai_list_source_default">Goonhub by INX</string>
     <string name="ai_list_source_dialog_body">Dùng máy chủ khác có phát hành danh sách, chẳng hạn máy chủ bạn tự lưu trữ. Để trống URL để dùng nguồn của Flow.</string>
     <string name="ai_list_source_url_hint">URL máy chủ</string>
     <string name="ai_list_source_key_hint">Khóa công khai (tùy chọn)</string>

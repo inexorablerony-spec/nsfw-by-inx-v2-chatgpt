@@ -206,7 +206,7 @@
     <string name="artist">Artista</string>
     <string name="comments">Comentarios</string>
     <string name="filter_workout">Ejercicio</string>
-    <string name="app_name">Flow</string>
+    <string name="app_name">Goonhub by INX</string>
     <string name="download_all">Descargar todo</string>
     <string name="saved">Guardadas</string>
     <string name="resume">Reanudar</string>
@@ -5257,7 +5257,7 @@
     <string name="settings_keywords_ai_list">IA, slop, generado, AiSList, filtro, bloquear</string>
     <string name="ai_list_status_count_now">%1$s canales, actualizada ahora mismo</string>
     <string name="ai_list_source_title">Fuente de la lista</string>
-    <string name="ai_list_source_default">Flow</string>
+    <string name="ai_list_source_default">Goonhub by INX</string>
     <string name="ai_list_source_dialog_body">Usa otro servidor que publique la lista, como uno que alojes tú. Deja la URL vacía para usar la de Flow.</string>
     <string name="ai_list_source_url_hint">URL del servidor</string>
     <string name="ai_list_source_key_hint">Clave pública (opcional)</string>

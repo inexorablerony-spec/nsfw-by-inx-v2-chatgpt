@@ -992,7 +992,7 @@
     <string name="add_all_to_playlist">أضف إلى قائمة التشغيل الخاصة بي</string>
     <string name="merge_playlist_dialog_title">أضف جميع الأغاني إلى…</string>
     <string name="merge_playlist_no_playlists">لا توجد قوائم تشغيل حتى الآن. أنشئ واحدة أولاً!</string>
-    <string name="app_name">Flow</string>
+    <string name="app_name">Goonhub by INX</string>
     <string name="library_music_playlists_label">قوائم تشغيل الموسيقى</string>
     <string name="library_music_playlists_subtitle">مجموعات الموسيقى الخاصة بك</string>
     <string name="library_manage_data_subtitle">مسح ذاكرة التخزين المؤقت و التاريخ</string>
@@ -5474,7 +5474,7 @@
     <string name="settings_keywords_ai_list">الذكاء الاصطناعي، المحتوى الرديء، مُولّد، AiSList، تصفية، حظر</string>
     <string name="ai_list_status_count_now">%1$s قناة، تم التحديث للتو</string>
     <string name="ai_list_source_title">مصدر القائمة</string>
-    <string name="ai_list_source_default">Flow</string>
+    <string name="ai_list_source_default">Goonhub by INX</string>
     <string name="ai_list_source_dialog_body">استخدم خادمًا آخر ينشر القائمة، مثل خادم تستضيفه بنفسك. اترك الرابط فارغًا لاستخدام خادم Flow.</string>
     <string name="ai_list_source_url_hint">رابط الخادم</string>
     <string name="ai_list_source_key_hint">المفتاح العام (اختياري)</string>

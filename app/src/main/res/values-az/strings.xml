@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Flow</string>
+    <string name="app_name">Goonhub by INX</string>
     <string name="subscriptions_search_placeholder">Abunəlikləri axtar…</string>
     <string name="subscriptions_sort_label">Kanalları çeşidlə</string>
     <string name="subscriptions_sort_default">Standart</string>
@@ -4914,7 +4914,7 @@
     <string name="settings_keywords_ai_list">süni intellekt, slop, yaradılan, AiSList, filtr, blok</string>
     <string name="ai_list_status_count_now">%1$s kanal, az əvvəl yeniləndi</string>
     <string name="ai_list_source_title">Siyahı mənbəyi</string>
-    <string name="ai_list_source_default">Flow</string>
+    <string name="ai_list_source_default">Goonhub by INX</string>
     <string name="ai_list_source_dialog_body">Siyahını dərc edən başqa bir serverdən (məsələn, sahiblik etdiyiniz) istifadə edin. Flow-un serverindən istifadə etmək üçün URL-i boş buraxın.</string>
     <string name="ai_list_source_url_hint">Server URL-i</string>
     <string name="ai_list_source_key_hint">İctimai açar (istəyə görə)</string>
