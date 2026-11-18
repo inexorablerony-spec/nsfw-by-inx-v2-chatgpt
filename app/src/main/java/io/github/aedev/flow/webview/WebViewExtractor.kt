@@ -36,7 +36,8 @@ sealed class ExtractionResult {
 class WebViewExtractor(private val context: android.content.Context) {
     
     companion object {
-        private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         private const val EXTRACTION_TIMEOUT_MS = 20000L
         private const val OBSERVATION_PERIOD_MS = 8000L
         private const val POLL_INTERVAL_MS = 500L

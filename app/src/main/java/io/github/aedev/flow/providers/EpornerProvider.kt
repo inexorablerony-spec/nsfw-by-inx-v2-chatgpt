@@ -136,7 +136,12 @@ class EpornerProvider(
         }
         val host = uri.host?.lowercase(Locale.ROOT)
         val allowedHost = host == "eporner.com" || host == "www.eporner.com"
-        require(uri.scheme.equals("https", ignoreCase = true) && allowedHost && uri.rawUserInfo == null && uri.port in listOf(-1, 443)) {
+        require(
+            uri.scheme.equals("https", ignoreCase = true) &&
+                allowedHost &&
+                uri.rawUserInfo == null &&
+                uri.port in listOf(-1, 443)
+        ) {
             "Only HTTPS Eporner page URLs are allowed"
         }
         return uri.toURL()
@@ -244,7 +249,10 @@ class EpornerProvider(
     private fun extractSynopsis(html: String): String =
         META_TAG_PATTERN.findAll(html)
             .map { it.value }
-            .firstOrNull { attribute(it, "property").equals("og:description", ignoreCase = true) || attribute(it, "name").equals("description", ignoreCase = true) }
+            .firstOrNull {
+                attribute(it, "property").equals("og:description", ignoreCase = true) ||
+                    attribute(it, "name").equals("description", ignoreCase = true)
+            }
             ?.let { decodeBasicEntities(attribute(it, "content")) }
             .orEmpty()
 
@@ -274,7 +282,8 @@ class EpornerProvider(
     companion object {
         private const val CONNECT_TIMEOUT_MS = 10_000
         private const val READ_TIMEOUT_MS = 15_000
-        private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         private const val MAX_REDIRECTS = 5
         private val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         private val ALLOWED_HOSTS = setOf("eporner.com", "www.eporner.com")

@@ -26,6 +26,8 @@ import androidx.room.Index
 data class PlaylistVideoCrossRef(
     val playlistId: String,
     val videoId: String,
-    val position: Long, // For custom ordering within playlist
-    val addedAt: Long = System.currentTimeMillis() // When the video was added to this playlist
+    // For custom ordering within playlist
+    val position: Long,
+    // When the video was added to this playlist
+    val addedAt: Long = System.currentTimeMillis()
 )

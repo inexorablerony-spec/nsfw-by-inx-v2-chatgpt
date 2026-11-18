@@ -34,7 +34,11 @@ class WebViewProvider(
 
     override suspend fun getStream(link: String): List<Stream> {
         val normalizedUrl = normalizeInputUrl(link)
-            ?: throw ProviderOperationException(name, "URL validation", IllegalArgumentException("Enter a valid HTTP or HTTPS website URL"))
+            ?: throw ProviderOperationException(
+                name,
+                "URL validation",
+                IllegalArgumentException("Enter a valid HTTP or HTTPS website URL")
+            )
 
         return when (val result = extractMedia(normalizedUrl)) {
             is ExtractionResult.Success -> result.candidates.map { candidate ->

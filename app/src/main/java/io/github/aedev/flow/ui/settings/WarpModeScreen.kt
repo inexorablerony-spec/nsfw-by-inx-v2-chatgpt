@@ -83,7 +83,9 @@ fun WarpModeScreen() {
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 Text(
-                    text = "This is an app-level proxy, not a system VPN. Connection is verified against Cloudflare before showing CONNECTED. Requires libusque.so.",
+                    text = "This is an app-level proxy, not a system VPN. " +
+                    "Connection is verified against Cloudflare before showing CONNECTED. " +
+                    "Requires libusque.so.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
