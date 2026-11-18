@@ -1,0 +1,1614 @@
+--- a/app/src/main/java/io/github/aedev/flow/providers/EpornerProvider.kt
++++ b/app/src/main/java/io/github/aedev/flow/providers/EpornerProvider.kt
+@@ -3,133 +3,288 @@
+ import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.withContext
++import java.io.IOException
+ import java.net.HttpURLConnection
++import java.net.URI
+ import java.net.URL
+-
+-class EpornerProvider : Provider {
++import java.net.URLEncoder
++import java.nio.charset.StandardCharsets
++import java.util.Locale
++
++class EpornerProvider(
++    private val connectionFactory: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection }
++) : Provider {
+     override val name = "Eporner"
+     override val value = "eporner"
+-    override val description = "Eporner provider"
+-    
++    override val version = "1.0"
++    override val description = "Eporner video provider"
++    override val icon = "https://www.eporner.com/favicon.ico"
++
+     private val baseUrl = "https://www.eporner.com"
+-    
+-    override fun getInfo(enabled: Boolean) = ProviderInfo(name, value, description, enabled)
+-    
+-    override suspend fun getPosts(page: Int): List<Post> = withContext(Dispatchers.IO) {
+-        try {
+-            val url = "$baseUrl/page/$page/"
+-            val html = fetchHtml(url)
+-            parsePosts(html)
+-        } catch (e: CancellationException) {
+-            throw e
+-        } catch (e: Exception) {
+-            throw Exception("Eporner getPosts failed: ${e.message}", e)
+-        }
+-    }
+-    
+-    override suspend fun getSearchPosts(query: String, page: Int): List<Post> = withContext(Dispatchers.IO) {
+-        try {
+-            val url = "$baseUrl/search/${query.replace(" ", "-")}/$page/"
+-            val html = fetchHtml(url)
+-            parsePosts(html)
+-        } catch (e: CancellationException) {
+-            throw e
+-        } catch (e: Exception) {
+-            throw Exception("Eporner search failed: ${e.message}", e)
+-        }
+-    }
+-    
+-    override suspend fun getMeta(url: String): Info = withContext(Dispatchers.IO) {
+-        try {
+-            val html = fetchHtml(url)
++
++    override suspend fun getPosts(page: Int): List<Post> {
++        require(page >= 1) { "Page must be 1 or greater" }
++        return withContext(Dispatchers.IO) {
++            runProviderOperation("catalogue loading") {
++                parsePosts(fetchHtml(homePageUrl(page)))
++            }
++        }
++    }
++
++    override suspend fun getSearchPosts(query: String, page: Int): List<Post> {
++        require(page >= 1) { "Page must be 1 or greater" }
++        val normalizedQuery = query.trim()
++        require(normalizedQuery.isNotEmpty()) { "Search query must not be blank" }
++        return withContext(Dispatchers.IO) {
++            runProviderOperation("search") {
++                parsePosts(fetchHtml(searchUrl(normalizedQuery, page)))
++            }
++        }
++    }
++
++    override suspend fun getMeta(link: String): Info = withContext(Dispatchers.IO) {
++        runProviderOperation("metadata lookup") {
++            val pageUrl = validateSitePageUrl(link).toString()
++            val html = fetchHtml(pageUrl)
+             Info(
+                 title = extractTitle(html),
++                synopsis = extractSynopsis(html),
+                 image = extractImage(html),
+-                synopsis = "",
+                 imdbId = "",
+                 type = "movie",
+                 linkList = emptyList()
+             )
++        }
++    }
++
++    override suspend fun getStream(link: String): List<Stream> = withContext(Dispatchers.IO) {
++        runProviderOperation("stream resolution") {
++            val directStream = directStreamOrNull(link)
++            if (directStream != null) {
++                listOf(directStream)
++            } else {
++                val pageUrl = validateSitePageUrl(link).toString()
++                extractStreams(fetchHtml(pageUrl), pageUrl)
++            }
++        }
++    }
++
++    private fun fetchHtml(urlString: String): String {
++        var currentUrl = validateSitePageUrl(urlString)
++        repeat(MAX_REDIRECTS + 1) { redirectCount ->
++            var connection: HttpURLConnection? = null
++            try {
++                connection = connectionFactory(currentUrl)
++                connection.connectTimeout = CONNECT_TIMEOUT_MS
++                connection.readTimeout = READ_TIMEOUT_MS
++                // Redirects are followed manually so every hop is revalidated before a new request.
++                connection.instanceFollowRedirects = false
++                connection.setRequestProperty("User-Agent", USER_AGENT)
++                connection.setRequestProperty("Referer", baseUrl)
++
++                val responseCode = connection.responseCode
++                if (responseCode in REDIRECT_STATUS_CODES) {
++                    val location = connection.getHeaderField("Location")
++                        ?: throw IOException("HTTP $responseCode response did not include a redirect location")
++                    if (redirectCount == MAX_REDIRECTS) throw IOException("Too many redirects while requesting Eporner")
++                    val redirectedUrl = runCatching { currentUrl.toURI().resolve(location).toURL().toString() }
++                        .getOrElse { throw IOException("Invalid redirect URL", it) }
++                    currentUrl = validateSitePageUrl(redirectedUrl)
++                } else {
++                    if (responseCode !in 200..299) {
++                        runCatching { connection.errorStream?.close() }
++                        throw IOException("HTTP $responseCode while requesting ${currentUrl.host}")
++                    }
++                    return connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
++                }
++            } finally {
++                connection?.disconnect()
++            }
++        }
++        throw IOException("Too many redirects while requesting Eporner")
++    }
++
++    private inline fun <T> runProviderOperation(operation: String, block: () -> T): T {
++        try {
++            return block()
+         } catch (e: CancellationException) {
+             throw e
+-        } catch (e: Exception) {
+-            throw Exception("Eporner getMeta failed: ${e.message}", e)
+-        }
+-    }
+-    
+-    override suspend fun getStream(url: String): List<Stream> = withContext(Dispatchers.IO) {
+-        try {
+-            val html = fetchHtml(url)
+-            extractStreams(html, url)
+-        } catch (e: CancellationException) {
++        } catch (e: ProviderOperationException) {
+             throw e
+         } catch (e: Exception) {
+-            throw Exception("Eporner getStream failed: ${e.message}", e)
+-        }
+-    }
+-    
+-    private fun fetchHtml(urlString: String): String {
+-        var connection: HttpURLConnection? = null
+-        try {
+-            val url = URL(urlString)
+-            connection = url.openConnection() as HttpURLConnection
+-            connection.connectTimeout = 10000
+-            connection.readTimeout = 15000
+-            connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+-            
+-            val responseCode = connection.responseCode
+-            if (responseCode !in 200..299) {
+-                throw Exception("HTTP $responseCode")
+-            }
+-            
+-            return connection.inputStream.bufferedReader().use { it.readText() }
+-        } finally {
+-            connection?.disconnect()
+-        }
+-    }
+-    
+-    private fun parsePosts(html: String): List<Post> {
+-        val posts = mutableListOf<Post>()
+-        val seen = mutableSetOf<String>()
+-        val pattern = """href="(/hd-porn/[^"]+)"[^>]*>.*?alt="([^"]*)".*?src="([^"]+)"""".toRegex(RegexOption.DOT_MATCHES_ALL)
+-        
+-        pattern.findAll(html).forEach { match ->
+-            val link = baseUrl + match.groupValues[1]
+-            if (link !in seen) {
+-                seen.add(link)
+-                posts.add(Post(
+-                    title = match.groupValues[2],
+-                    link = link,
+-                    image = match.groupValues[3]
+-                ))
+-            }
+-        }
+-        
+-        return posts
+-    }
+-    
+-    private fun extractTitle(html: String): String {
+-        return """<title>([^<]+)</title>""".toRegex().find(html)?.groupValues?.get(1) ?: "Eporner"
+-    }
+-    
+-    private fun extractImage(html: String): String {
+-        return """og:image" content="([^"]+)"""".toRegex().find(html)?.groupValues?.get(1) ?: ""
+-    }
+-    
+-    private fun extractStreams(html: String, referer: String): List<Stream> {
+-        val streams = mutableListOf<Stream>()
+-        val pattern = """https?://[^"'\s]+\.(mp4|m3u8)[^"'\s]*""".toRegex()
+-        
+-        pattern.findAll(html).forEach { match ->
+-            val url = match.value
+-            streams.add(Stream(
+-                server = "Eporner",
+-                link = url,
+-                type = if (url.contains("m3u8")) "m3u8" else "mp4",
+-                headers = mapOf("Referer" to referer)
+-            ))
+-        }
+-        
+-        return streams
++            throw ProviderOperationException(name, operation, e)
++        }
++    }
++
++    internal fun homePageUrl(page: Int): String {
++        require(page >= 1) { "Page must be 1 or greater" }
++        return if (page == 1) baseUrl else "$baseUrl/?page=$page"
++    }
++
++    internal fun searchUrl(query: String, page: Int): String {
++        require(page >= 1) { "Page must be 1 or greater" }
++        require(query.isNotBlank()) { "Search query must not be blank" }
++        val encodedQuery = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.name())
++        return if (page == 1) "$baseUrl/search/$encodedQuery/" else "$baseUrl/search/$encodedQuery/$page/"
++    }
++
++    internal fun validateSitePageUrl(value: String): URL {
++        val uri = try {
++            URI(value.trim())
++        } catch (e: Exception) {
++            throw IllegalArgumentException("Invalid Eporner URL", e)
++        }
++        val host = uri.host?.lowercase(Locale.ROOT)
++        val allowedHost = host == "eporner.com" || host == "www.eporner.com"
++        require(uri.scheme.equals("https", ignoreCase = true) && allowedHost && uri.rawUserInfo == null && uri.port in listOf(-1, 443)) {
++            "Only HTTPS Eporner page URLs are allowed"
++        }
++        return uri.toURL()
++    }
++
++    internal fun directStreamOrNull(value: String): Stream? {
++        val uri = runCatching { URI(value.trim()) }.getOrNull() ?: return null
++        val scheme = uri.scheme?.lowercase(Locale.ROOT)
++        val path = uri.path?.lowercase(Locale.ROOT).orEmpty()
++        val type = when {
++            path.endsWith(".m3u8") -> "m3u8"
++            path.endsWith(".mp4") -> "mp4"
++            else -> return null
++        }
++        require(scheme == "https" || scheme == "http") { "Direct media URLs must use HTTP or HTTPS" }
++        require(!uri.host.isNullOrBlank() && uri.rawUserInfo == null && (uri.port == -1 || uri.port in 1..65535)) {
++            "Direct media URL must have a valid host and port"
++        }
++        return Stream(
++            server = name,
++            link = uri.toASCIIString(),
++            type = type,
++            headers = mapOf("User-Agent" to USER_AGENT, "Referer" to baseUrl)
++        )
++    }
++
++    internal fun parsePosts(html: String): List<Post> {
++        val posts = LinkedHashMap<String, Post>()
++        ANCHOR_PATTERN.findAll(html).forEach { anchorMatch ->
++            val rawLink = anchorMatch.groupValues[1].replace("&amp;", "&")
++            val parsedLink = runCatching { URI(baseUrl).resolve(rawLink).toURL() }.getOrNull() ?: return@forEach
++            val path = parsedLink.path.lowercase(Locale.ROOT)
++            if (
++                (!path.startsWith("/hd-porn/") && !path.startsWith("/video-")) ||
++                parsedLink.protocol != "https" ||
++                parsedLink.host.lowercase(Locale.ROOT) !in ALLOWED_HOSTS ||
++                parsedLink.userInfo != null ||
++                parsedLink.port !in listOf(-1, 443)
++            ) {
++                return@forEach
++            }
++
++            val anchorHtml = anchorMatch.groupValues[2]
++            val imageTag = IMAGE_PATTERN.find(anchorHtml)?.value.orEmpty()
++            val title = attribute(imageTag, "alt")
++                .ifBlank { attribute(anchorMatch.value, "title") }
++                .ifBlank { anchorHtml.replace(TAG_PATTERN, " ").replace(WHITESPACE_PATTERN, " ").trim() }
++            if (title.isBlank()) return@forEach
++
++            val rawImage = attribute(imageTag, "data-src")
++                .ifBlank { attribute(imageTag, "data-original") }
++                .ifBlank { attribute(imageTag, "src") }
++            val image = if (rawImage.isBlank()) "" else {
++                runCatching { URI(baseUrl).resolve(rawImage.replace("&amp;", "&")).toURL().toString() }.getOrDefault("")
++            }
++            val canonicalLink = parsedLink.toString()
++            posts.putIfAbsent(canonicalLink, Post(title = decodeBasicEntities(title), link = canonicalLink, image = image))
++        }
++        return posts.values.toList()
++    }
++
++    internal fun extractStreams(html: String, referer: String): List<Stream> {
++        val normalizedHtml = html
++            .replace("\\/", "/")
++            .replace("\\u0026", "&", ignoreCase = true)
++            .replace("\\u003d", "=", ignoreCase = true)
++            .replace("\\u003f", "?", ignoreCase = true)
++            .replace("&amp;", "&")
++        val streams = LinkedHashMap<String, Stream>()
++
++        STREAM_PATTERN.findAll(normalizedHtml).forEach { match ->
++            val candidate = match.value.trimEnd(')', ']', '}', ',', ';', '.')
++            val uri = runCatching { URI(candidate) }.getOrNull() ?: return@forEach
++            val scheme = uri.scheme?.lowercase(Locale.ROOT)
++            val path = uri.path?.lowercase(Locale.ROOT).orEmpty()
++            val type = when {
++                path.endsWith(".m3u8") -> "m3u8"
++                path.endsWith(".mp4") -> "mp4"
++                else -> return@forEach
++            }
++            if (
++                scheme !in setOf("http", "https") ||
++                uri.host.isNullOrBlank() ||
++                uri.rawUserInfo != null ||
++                (uri.port != -1 && uri.port !in 1..65535)
++            ) return@forEach
++            val lowerCandidate = candidate.lowercase(Locale.ROOT)
++            if (BLOCKED_MEDIA_HINTS.any(lowerCandidate::contains)) return@forEach
++            streams.putIfAbsent(
++                uri.toASCIIString(),
++                Stream(
++                    server = name,
++                    link = uri.toASCIIString(),
++                    type = type,
++                    headers = mapOf("User-Agent" to USER_AGENT, "Referer" to referer)
++                )
++            )
++        }
++        return streams.values.toList()
++    }
++
++    private fun extractTitle(html: String): String =
++        TITLE_PATTERN.find(html)?.groupValues?.get(1)?.let(::decodeBasicEntities)?.trim().orEmpty().ifBlank { "Eporner" }
++
++    private fun extractSynopsis(html: String): String =
++        META_TAG_PATTERN.findAll(html)
++            .map { it.value }
++            .firstOrNull { attribute(it, "property").equals("og:description", ignoreCase = true) || attribute(it, "name").equals("description", ignoreCase = true) }
++            ?.let { decodeBasicEntities(attribute(it, "content")) }
++            .orEmpty()
++
++    private fun extractImage(html: String): String =
++        META_TAG_PATTERN.findAll(html)
++            .map { it.value }
++            .firstOrNull { attribute(it, "property").equals("og:image", ignoreCase = true) }
++            ?.let { attribute(it, "content") }
++            ?.takeIf { it.isNotBlank() }
++            ?.let { raw -> runCatching { URI(baseUrl).resolve(raw).toURL().toString() }.getOrDefault("") }
++            .orEmpty()
++
++    private fun attribute(source: String, name: String): String =
++        Regex("(?is)\\b${Regex.escape(name)}\\s*=\\s*(['\"])(.*?)\\1")
++            .find(source)
++            ?.groupValues
++            ?.get(2)
++            .orEmpty()
++
++    private fun decodeBasicEntities(value: String): String = value
++        .replace("&amp;", "&", ignoreCase = true)
++        .replace("&quot;", "\"", ignoreCase = true)
++        .replace("&#39;", "'", ignoreCase = true)
++        .replace("&lt;", "<", ignoreCase = true)
++        .replace("&gt;", ">", ignoreCase = true)
++
++    companion object {
++        private const val CONNECT_TIMEOUT_MS = 10_000
++        private const val READ_TIMEOUT_MS = 15_000
++        private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
++        private const val MAX_REDIRECTS = 5
++        private val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
++        private val ALLOWED_HOSTS = setOf("eporner.com", "www.eporner.com")
++        private val BLOCKED_MEDIA_HINTS = listOf("preview", "trailer", "thumbnail", "thumb")
++        private val ANCHOR_PATTERN = Regex("(?is)<a\\b[^>]*\\bhref\\s*=\\s*['\"]([^'\"]+)['\"][^>]*>(.*?)</a\\s*>")
++        private val IMAGE_PATTERN = Regex("(?is)<img\\b[^>]*>")
++        private val TAG_PATTERN = Regex("(?is)<[^>]+>")
++        private val WHITESPACE_PATTERN = Regex("\\s+")
++        private val TITLE_PATTERN = Regex("(?is)<title\\b[^>]*>(.*?)</title>")
++        private val META_TAG_PATTERN = Regex("(?is)<meta\\b[^>]*>")
++        private val STREAM_PATTERN = Regex("(?i)https?://[^\\s\"'<>]+?\\.(?:mp4|m3u8)(?:\\?[^\\s\"'<>]*)?")
+     }
+ }
+
+--- a/app/src/main/java/io/github/aedev/flow/providers/Provider.kt
++++ b/app/src/main/java/io/github/aedev/flow/providers/Provider.kt
+@@ -49,11 +49,32 @@
+     val version: String
+     val description: String
+     val icon: String
+-    
++
++    /** Whether this provider contributes cards to the unified home catalogue. */
++    val supportsCatalogue: Boolean
++        get() = true
++
++    /** Whether this provider participates in unified catalogue searches. */
++    val supportsSearch: Boolean
++        get() = supportsCatalogue
++
+     suspend fun getPosts(page: Int = 1): List<Post>
+     suspend fun getSearchPosts(query: String, page: Int = 1): List<Post>
+     suspend fun getMeta(link: String): Info
+     suspend fun getStream(link: String): List<Stream>
+-    
++
+     fun getInfo(enabled: Boolean): ProviderInfo = ProviderInfo(name, value, version, description, icon, enabled)
+ }
++
++/** Adds consistent provider and operation context without hiding the original cause. */
++class ProviderOperationException(
++    val providerName: String,
++    val operation: String,
++    cause: Throwable
++) : Exception(
++    "$providerName $operation failed: ${cause.message?.takeIf { it.isNotBlank() } ?: cause::class.java.simpleName}",
++    cause
++)
++
++/** Raised when a provider is missing or disabled at the moment an operation is requested. */
++class ProviderUnavailableException(message: String) : IllegalStateException(message)
+
+--- a/app/src/main/java/io/github/aedev/flow/providers/UnifiedCatalogueRepository.kt
++++ b/app/src/main/java/io/github/aedev/flow/providers/UnifiedCatalogueRepository.kt
+@@ -4,54 +4,138 @@
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.withContext
+ 
+-class UnifiedCatalogueRepository {
+-    suspend fun getHomeFeed(page: Int = 1): CatalogueResult = withContext(Dispatchers.IO) {
+-        val results = mutableListOf<ProviderCatalogueItem>()
+-        val errors = mutableListOf<String>()
+-        
+-        ProviderRegistry.getEnabled().forEach { provider ->
+-            try {
+-                val posts = provider.getPosts(page)
+-                results.addAll(posts.map { 
+-                    ProviderCatalogueItem(provider.value, provider.name, it)
+-                })
+-            } catch (e: CancellationException) {
+-                throw e
+-            } catch (e: Exception) {
+-                errors.add("${provider.name}: ${e.message ?: "Unknown error"}")
++/**
++ * Coordinates enabled providers without allowing one provider failure to discard successful results
++ * from the others. The injectable suppliers also keep the repository deterministic in JVM tests.
++ */
++class UnifiedCatalogueRepository(
++    private val enabledProviders: () -> List<Provider> = { ProviderRegistry.getEnabled() },
++    private val providerLookup: (String) -> Provider? = { ProviderRegistry.getByValue(it) },
++    private val isProviderEnabled: (String) -> Boolean = { ProviderRegistry.isEnabled(it) }
++) {
++    suspend fun getHomeFeed(page: Int = 1): CatalogueResult {
++        require(page >= 1) { "Page must be 1 or greater" }
++        return withContext(Dispatchers.IO) {
++            val results = LinkedHashMap<String, ProviderCatalogueItem>()
++            val errors = mutableListOf<String>()
++
++            enabledProviders().forEach { provider ->
++                if (!provider.supportsCatalogue || !isProviderEnabled(provider.value)) return@forEach
++                try {
++                    // Recheck immediately before dispatch so a provider disabled during a refresh is not called.
++                    if (!isProviderEnabled(provider.value)) return@forEach
++                    val posts = provider.getPosts(page)
++                    posts.forEach { post ->
++                        val key = "${provider.value}\u0000${post.link}"
++                        results.putIfAbsent(key, ProviderCatalogueItem(provider.value, provider.name, post))
++                    }
++                } catch (e: CancellationException) {
++                    throw e
++                } catch (e: Exception) {
++                    errors += providerError(provider, "catalogue loading", e)
++                }
+             }
++
++            CatalogueResult(results.values.toList(), errors)
+         }
+-        
+-        CatalogueResult(results, errors)
+     }
+-    
+-    suspend fun search(query: String, page: Int = 1): CatalogueResult = withContext(Dispatchers.IO) {
+-        val results = mutableListOf<ProviderCatalogueItem>()
+-        val errors = mutableListOf<String>()
+-        
+-        ProviderRegistry.getEnabled().forEach { provider ->
+-            try {
+-                val posts = provider.getSearchPosts(query, page)
+-                results.addAll(posts.map { 
+-                    ProviderCatalogueItem(provider.value, provider.name, it)
+-                })
+-            } catch (e: CancellationException) {
+-                throw e
+-            } catch (e: Exception) {
+-                errors.add("${provider.name}: ${e.message ?: "Unknown error"}")
++
++    suspend fun search(query: String, page: Int = 1): CatalogueResult {
++        require(page >= 1) { "Page must be 1 or greater" }
++        require(query.isNotBlank()) { "Search query must not be blank" }
++        return withContext(Dispatchers.IO) {
++            val results = LinkedHashMap<String, ProviderCatalogueItem>()
++            val errors = mutableListOf<String>()
++
++            enabledProviders().forEach { provider ->
++                if (!provider.supportsSearch || !isProviderEnabled(provider.value)) return@forEach
++                try {
++                    if (!isProviderEnabled(provider.value)) return@forEach
++                    val posts = provider.getSearchPosts(query, page)
++                    posts.forEach { post ->
++                        val key = "${provider.value}\u0000${post.link}"
++                        results.putIfAbsent(key, ProviderCatalogueItem(provider.value, provider.name, post))
++                    }
++                } catch (e: CancellationException) {
++                    throw e
++                } catch (e: Exception) {
++                    errors += providerError(provider, "search", e)
++                }
+             }
++
++            CatalogueResult(results.values.toList(), errors)
+         }
+-        
+-        CatalogueResult(results, errors)
+     }
+-    
++
++    suspend fun getProviderPosts(providerId: String, page: Int = 1): List<Post> {
++        require(page >= 1) { "Page must be 1 or greater" }
++        return withContext(Dispatchers.IO) {
++            val provider = requireEnabledProvider(providerId)
++            if (!provider.supportsCatalogue) {
++                throw ProviderOperationException(
++                    provider.name,
++                    "catalogue loading",
++                    UnsupportedOperationException("This provider does not expose a catalogue")
++                )
++            }
++            runOperation(provider, "catalogue loading") { provider.getPosts(page) }
++        }
++    }
++
++    suspend fun searchProvider(providerId: String, query: String, page: Int = 1): List<Post> {
++        require(page >= 1) { "Page must be 1 or greater" }
++        require(query.isNotBlank()) { "Search query must not be blank" }
++        return withContext(Dispatchers.IO) {
++            val provider = requireEnabledProvider(providerId)
++            if (!provider.supportsSearch) {
++                throw ProviderOperationException(
++                    provider.name,
++                    "search",
++                    UnsupportedOperationException("This provider does not support catalogue search")
++                )
++            }
++            runOperation(provider, "search") { provider.getSearchPosts(query, page) }
++        }
++    }
++
+     suspend fun getDetails(item: ProviderCatalogueItem): Info = withContext(Dispatchers.IO) {
+-        val provider = ProviderRegistry.getByValue(item.providerId)
+-        provider?.getMeta(item.post.link) ?: Info("", "", "", "", "movie", emptyList())
++        val provider = requireEnabledProvider(item.providerId)
++        runOperation(provider, "metadata lookup") { provider.getMeta(item.post.link) }
+     }
+-    
++
+     suspend fun getStreams(item: ProviderCatalogueItem): List<Stream> = withContext(Dispatchers.IO) {
+-        val provider = ProviderRegistry.getByValue(item.providerId)
+-        provider?.getStream(item.post.link) ?: emptyList()
++        val provider = requireEnabledProvider(item.providerId)
++        runOperation(provider, "stream resolution") { provider.getStream(item.post.link) }
+     }
++
++    private fun requireEnabledProvider(providerId: String): Provider {
++        val provider = providerLookup(providerId)
++            ?: throw ProviderUnavailableException("Provider '$providerId' is not registered")
++        if (!isProviderEnabled(providerId)) {
++            throw ProviderUnavailableException("${provider.name} is disabled. Enable it in Provider Manager to continue.")
++        }
++        return provider
++    }
++
++    private inline fun <T> runOperation(provider: Provider, operation: String, block: () -> T): T {
++        try {
++            // A second check narrows the race between lookup and beginning the provider request.
++            if (!isProviderEnabled(provider.value)) {
++                throw ProviderUnavailableException("${provider.name} was disabled before $operation started")
++            }
++            return block()
++        } catch (e: CancellationException) {
++            throw e
++        } catch (e: ProviderUnavailableException) {
++            throw e
++        } catch (e: ProviderOperationException) {
++            throw e
++        } catch (e: Exception) {
++            throw ProviderOperationException(provider.name, operation, e)
++        }
++    }
++
++    private fun providerError(provider: Provider, operation: String, error: Exception): String =
++        if (error is ProviderOperationException) error.message ?: "${provider.name} $operation failed"
++        else "${provider.name} $operation failed: ${error.message?.takeIf { it.isNotBlank() } ?: error::class.java.simpleName}"
+ }
+
+--- a/app/src/main/java/io/github/aedev/flow/providers/WebViewProvider.kt
++++ b/app/src/main/java/io/github/aedev/flow/providers/WebViewProvider.kt
+@@ -3,44 +3,75 @@
+ import android.content.Context
+ import io.github.aedev.flow.webview.ExtractionResult
+ import io.github.aedev.flow.webview.WebViewExtractor
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.withContext
++import kotlinx.coroutines.CancellationException
++import java.net.URI
+ 
+-class WebViewProvider(private val context: Context) : Provider {
++/** A URL-based extractor, not a catalogue source. */
++class WebViewProvider(
++    context: Context,
++    private val extractMedia: suspend (String) -> ExtractionResult = WebViewExtractor(context)::extractMedia
++) : Provider {
+     override val name = "WebView"
+     override val value = "webview"
+     override val version = "1.0"
+-    override val description = "WebView extractor for JavaScript-rendered sites"
++    override val description = "Extracts media from JavaScript-rendered websites opened by URL"
+     override val icon = ""
+-    
+-    private val extractor = WebViewExtractor(context)
+-    
+-    override suspend fun getPosts(page: Int): List<Post> = emptyList()
+-    
+-    override suspend fun getSearchPosts(query: String, page: Int): List<Post> = emptyList()
+-    
+-    override suspend fun getMeta(link: String): Info = withContext(Dispatchers.IO) {
+-        Info("WebView Video", "", "", "", "movie", emptyList())
+-    }
+-    
+-    override suspend fun getStream(link: String): List<Stream> = withContext(Dispatchers.IO) {
+-        when (val result = extractor.extractMedia(link)) {
+-            is ExtractionResult.Success -> {
+-                result.candidates.map { candidate ->
+-                    val headers = mutableMapOf(
+-                        "User-Agent" to candidate.userAgent,
+-                        "Referer" to candidate.referer
+-                    )
+-                    candidate.cookies?.let { headers["Cookie"] = it }
+-                    Stream(
+-                        server = "WebView",
+-                        link = candidate.url,
+-                        type = candidate.type,
+-                        headers = headers
+-                    )
++    override val supportsCatalogue = false
++    override val supportsSearch = false
++
++    override suspend fun getPosts(page: Int): List<Post> =
++        throw UnsupportedOperationException("WebView is a URL extractor and does not provide catalogue posts")
++
++    override suspend fun getSearchPosts(query: String, page: Int): List<Post> =
++        throw UnsupportedOperationException("WebView is a URL extractor and does not provide catalogue search")
++
++    override suspend fun getMeta(link: String): Info =
++        throw ProviderOperationException(
++            name,
++            "metadata lookup",
++            UnsupportedOperationException("WebView extraction does not currently provide page metadata")
++        )
++
++    override suspend fun getStream(link: String): List<Stream> {
++        val normalizedUrl = normalizeInputUrl(link)
++            ?: throw ProviderOperationException(name, "URL validation", IllegalArgumentException("Enter a valid HTTP or HTTPS website URL"))
++
++        return when (val result = extractMedia(normalizedUrl)) {
++            is ExtractionResult.Success -> result.candidates.map { candidate ->
++                val headers = buildMap {
++                    put("User-Agent", candidate.userAgent)
++                    put("Referer", candidate.referer)
++                    candidate.cookies?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
+                 }
++                Stream(
++                    server = name,
++                    link = candidate.url,
++                    type = candidate.type,
++                    headers = headers
++                )
+             }
+-            is ExtractionResult.Error -> emptyList()
++            is ExtractionResult.Error -> throw ProviderOperationException(
++                name,
++                "stream extraction (${result.type.name.lowercase()})",
++                IllegalStateException(result.message)
++            )
+         }
+     }
++
++    companion object {
++        /** Adds HTTPS to a bare domain and rejects non-web schemes and malformed URLs. */
++        fun normalizeInputUrl(input: String): String? {
++            val trimmed = input.trim()
++            if (trimmed.isEmpty()) return null
++            val hasExplicitScheme = SCHEME_PATTERN.containsMatchIn(trimmed)
++            val candidate = if (hasExplicitScheme) trimmed else "https://$trimmed"
++            val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
++            val scheme = uri.scheme?.lowercase()
++            if (scheme !in setOf("http", "https") || uri.host.isNullOrBlank() || uri.rawUserInfo != null) return null
++            if (uri.port != -1 && uri.port !in 1..65535) return null
++            return uri.normalize().toASCIIString()
++        }
++
++        private val SCHEME_PATTERN = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:")
++    }
+ }
+
+--- a/app/src/main/java/io/github/aedev/flow/ui/providers/ProviderSettingsScreen.kt
++++ b/app/src/main/java/io/github/aedev/flow/ui/providers/ProviderSettingsScreen.kt
+@@ -14,24 +14,22 @@
+ @Composable
+ fun ProviderSettingsScreen() {
+     val providers = remember { ProviderRegistry.getAll() }
+-    var enabledMap by remember { mutableStateOf(providers.associate { it.value to ProviderRegistry.isEnabled(it.value) }) }
+-    
++    val registryState by ProviderRegistry.state.collectAsState()
++
+     Column(modifier = Modifier.fillMaxSize()) {
+         Text(
+             text = "Provider Settings",
+             style = MaterialTheme.typography.headlineMedium,
+             modifier = Modifier.padding(16.dp)
+         )
+-        
++
+         LazyColumn {
+-            items(providers) { provider ->
++            items(providers, key = { it.value }) { provider ->
++                val isEnabled = registryState.providers.firstOrNull { it.value == provider.value }?.enabled == true
+                 ProviderToggleItem(
+                     provider = provider,
+-                    isEnabled = enabledMap[provider.value] ?: true,
+-                    onToggle = { enabled ->
+-                        ProviderRegistry.setEnabled(provider.value, enabled)
+-                        enabledMap = enabledMap.toMutableMap().apply { put(provider.value, enabled) }
+-                    }
++                    isEnabled = isEnabled,
++                    onToggle = { enabled -> ProviderRegistry.setEnabled(provider.value, enabled) }
+                 )
+             }
+         }
+
+--- a/app/src/main/java/io/github/aedev/flow/ui/providers/ProviderVideoPlayer.kt
++++ b/app/src/main/java/io/github/aedev/flow/ui/providers/ProviderVideoPlayer.kt
+@@ -10,6 +10,7 @@
+ import io.github.aedev.flow.player.GlobalPlayerState
+ import io.github.aedev.flow.providers.ProviderCatalogueItem
+ import io.github.aedev.flow.providers.ProviderRegistry
++import io.github.aedev.flow.providers.UnifiedCatalogueRepository
+ import kotlinx.coroutines.CancellationException
+ 
+ @Composable
+@@ -24,6 +25,7 @@
+     
+     val playerManager = remember { EnhancedPlayerManager.getInstance() }
+     val playerState by playerManager.playerState.collectAsState()
++    val repository = remember { UnifiedCatalogueRepository() }
+     
+     val isCurrentVideo = playerState.currentVideoId == item.post.link
+     
+@@ -42,7 +44,14 @@
+                 isResolving = false
+                 return@LaunchedEffect
+             }
+-            val streams = provider.getStream(item.post.link)
++            // Route stream resolution through the repository so the enabled-provider guard is shared
++            // by catalogue, metadata and playback requests.
++            val streams = repository.getStreams(item)
++            if (!ProviderRegistry.isEnabled(item.providerId)) {
++                error = "This provider was disabled before playback could start"
++                isResolving = false
++                return@LaunchedEffect
++            }
+             if (streams.isEmpty()) {
+                 error = "No streams found"
+                 isResolving = false
+
+--- a/app/src/main/java/io/github/aedev/flow/ui/providers/SearchScreen.kt
++++ b/app/src/main/java/io/github/aedev/flow/ui/providers/SearchScreen.kt
+@@ -12,7 +12,8 @@
+ import coil.compose.AsyncImage
+ import io.github.aedev.flow.providers.Post
+ import io.github.aedev.flow.providers.Provider
+-import kotlinx.coroutines.launch
++import io.github.aedev.flow.providers.UnifiedCatalogueRepository
++import kotlinx.coroutines.CancellationException
+ 
+ @Composable
+ fun SearchScreen(
+@@ -22,40 +23,58 @@
+     var searchQuery by remember { mutableStateOf("") }
+     var posts by remember { mutableStateOf<List<Post>>(emptyList()) }
+     var isLoading by remember { mutableStateOf(false) }
+-    val scope = rememberCoroutineScope()
+-    
++    var error by remember { mutableStateOf<String?>(null) }
++    val repository = remember { UnifiedCatalogueRepository() }
++
+     Column(modifier = Modifier.fillMaxSize()) {
+         TextField(
+             value = searchQuery,
+-            onValueChange = { searchQuery = it },
++            onValueChange = {
++                searchQuery = it
++                error = null
++            },
+             label = { Text("Search") },
+             modifier = Modifier
+                 .fillMaxWidth()
+                 .padding(16.dp)
+         )
+-        
++
+         Button(
+             onClick = {
+-                scope.launch {
+-                    isLoading = true
+-                    posts = provider.getSearchPosts(searchQuery)
+-                    isLoading = false
+-                }
++                isLoading = true
++                error = null
++                posts = emptyList()
+             },
++            enabled = searchQuery.isNotBlank() && !isLoading,
+             modifier = Modifier.padding(horizontal = 16.dp)
+         ) {
+             Text("Search")
+         }
+-        
++
++        LaunchedEffect(isLoading) {
++            if (!isLoading) return@LaunchedEffect
++            try {
++                posts = repository.searchProvider(provider.value, searchQuery)
++            } catch (e: CancellationException) {
++                throw e
++            } catch (e: Exception) {
++                error = e.message ?: "Search failed"
++            } finally {
++                isLoading = false
++            }
++        }
++
+         if (isLoading) {
+             CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+-        } else {
++        }
++        error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
++        if (!isLoading && error == null) {
+             LazyVerticalGrid(
+                 columns = GridCells.Fixed(2),
+                 modifier = Modifier.fillMaxSize(),
+                 contentPadding = PaddingValues(8.dp)
+             ) {
+-                items(posts) { post ->
++                items(posts, key = { it.link }) { post ->
+                     Card(
+                         modifier = Modifier
+                             .padding(4.dp)
+
+--- a/app/src/main/java/io/github/aedev/flow/ui/providers/UnifiedHomeScreen.kt
++++ b/app/src/main/java/io/github/aedev/flow/ui/providers/UnifiedHomeScreen.kt
+@@ -10,8 +10,11 @@
+ import androidx.compose.ui.layout.ContentScale
+ import androidx.compose.ui.unit.dp
+ import coil.compose.AsyncImage
++import io.github.aedev.flow.providers.Post
+ import io.github.aedev.flow.providers.ProviderCatalogueItem
++import io.github.aedev.flow.providers.ProviderRegistry
+ import io.github.aedev.flow.providers.UnifiedCatalogueRepository
++import io.github.aedev.flow.providers.WebViewProvider
+ import kotlinx.coroutines.CancellationException
+ 
+ @Composable
+@@ -22,8 +25,12 @@
+     var isLoading by remember { mutableStateOf(true) }
+     var errors by remember { mutableStateOf<List<String>>(emptyList()) }
+     var catalogueError by remember { mutableStateOf<String?>(null) }
++    var webViewUrl by remember { mutableStateOf("") }
++    var webViewUrlError by remember { mutableStateOf<String?>(null) }
+     val repository = remember { UnifiedCatalogueRepository() }
+-    
++    val registryState by ProviderRegistry.state.collectAsState()
++    val webViewEnabled = registryState.providers.any { it.value == "webview" && it.enabled }
++
+     LaunchedEffect(Unit) {
+         isLoading = true
+         catalogueError = null
+@@ -38,14 +45,58 @@
+         }
+         isLoading = false
+     }
+-    
++
+     Column(modifier = Modifier.fillMaxSize()) {
+         Text(
+             text = "All Providers",
+             style = MaterialTheme.typography.headlineMedium,
+             modifier = Modifier.padding(16.dp)
+         )
+-        
++
++        if (webViewEnabled) {
++            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
++                Text("Open a website", style = MaterialTheme.typography.titleMedium)
++                Spacer(modifier = Modifier.height(8.dp))
++                OutlinedTextField(
++                    value = webViewUrl,
++                    onValueChange = {
++                        webViewUrl = it
++                        webViewUrlError = null
++                    },
++                    modifier = Modifier.fillMaxWidth(),
++                    singleLine = true,
++                    label = { Text("Website URL") },
++                    placeholder = { Text("https://example.com/video") },
++                    isError = webViewUrlError != null
++                )
++                webViewUrlError?.let { message ->
++                    Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
++                }
++                Button(
++                    onClick = {
++                        val normalized = WebViewProvider.normalizeInputUrl(webViewUrl)
++                        if (normalized == null) {
++                            webViewUrlError = "Enter a valid website URL beginning with http:// or https://"
++                        } else {
++                            webViewUrlError = null
++                            val host = runCatching { java.net.URI(normalized).host }.getOrNull().orEmpty()
++                            onVideoClick(
++                                ProviderCatalogueItem(
++                                    providerId = "webview",
++                                    providerName = "WebView",
++                                    post = Post(title = host.ifBlank { normalized }, link = normalized, image = "")
++                                )
++                            )
++                        }
++                    },
++                    enabled = webViewUrl.isNotBlank(),
++                    modifier = Modifier.fillMaxWidth()
++                ) {
++                    Text("Extract and play")
++                }
++            }
++        }
++
+         when {
+             isLoading -> {
+                 CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+@@ -58,7 +109,7 @@
+                 Text("No videos found", modifier = Modifier.padding(16.dp))
+             }
+             items.isEmpty() && errors.isNotEmpty() -> {
+-                Text("All providers failed", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
++                Text("All catalogue providers failed", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
+                 errors.forEach { error ->
+                     Text(error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                 }
+@@ -86,7 +137,7 @@
+                         .weight(1f),
+                     contentPadding = PaddingValues(8.dp)
+                 ) {
+-                    items(items) { item ->
++                    items(items, key = { "${it.providerId}:${it.post.link}" }) { item ->
+                         VideoCard(item = item, onClick = { onVideoClick(item) })
+                     }
+                 }
+
+--- a/app/src/main/java/io/github/aedev/flow/ui/providers/VideoListScreen.kt
++++ b/app/src/main/java/io/github/aedev/flow/ui/providers/VideoListScreen.kt
+@@ -12,7 +12,8 @@
+ import coil.compose.AsyncImage
+ import io.github.aedev.flow.providers.Post
+ import io.github.aedev.flow.providers.Provider
+-import kotlinx.coroutines.launch
++import io.github.aedev.flow.providers.UnifiedCatalogueRepository
++import kotlinx.coroutines.CancellationException
+ 
+ @Composable
+ fun VideoListScreen(
+@@ -21,35 +22,44 @@
+ ) {
+     var posts by remember { mutableStateOf<List<Post>>(emptyList()) }
+     var isLoading by remember { mutableStateOf(true) }
+-    val scope = rememberCoroutineScope()
+-    
+-    LaunchedEffect(provider) {
+-        scope.launch {
+-            posts = provider.getPosts()
++    var error by remember { mutableStateOf<String?>(null) }
++    val repository = remember { UnifiedCatalogueRepository() }
++
++    LaunchedEffect(provider.value) {
++        isLoading = true
++        error = null
++        try {
++            posts = repository.getProviderPosts(provider.value)
++        } catch (e: CancellationException) {
++            throw e
++        } catch (e: Exception) {
++            error = e.message ?: "Failed to load provider catalogue"
++        } finally {
+             isLoading = false
+         }
+     }
+-    
++
+     Column(modifier = Modifier.fillMaxSize()) {
+         Text(
+             text = provider.name,
+             style = MaterialTheme.typography.headlineMedium,
+             modifier = Modifier.padding(16.dp)
+         )
+-        
++
+         if (isLoading) {
+             CircularProgressIndicator(modifier = Modifier.padding(16.dp))
++        } else if (error != null) {
++            Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
++        } else if (posts.isEmpty()) {
++            Text("No videos found", modifier = Modifier.padding(16.dp))
+         } else {
+             LazyVerticalGrid(
+                 columns = GridCells.Fixed(2),
+                 modifier = Modifier.fillMaxSize(),
+                 contentPadding = PaddingValues(8.dp)
+             ) {
+-                items(posts) { post ->
+-                    VideoItem(
+-                        post = post,
+-                        onClick = { onVideoClick(post) }
+-                    )
++                items(posts, key = { it.link }) { post ->
++                    VideoItem(post = post, onClick = { onVideoClick(post) })
+                 }
+             }
+         }
+
+--- a/app/src/main/java/io/github/aedev/flow/webview/WebViewExtractor.kt
++++ b/app/src/main/java/io/github/aedev/flow/webview/WebViewExtractor.kt
+@@ -28,7 +28,8 @@
+         TIMEOUT,
+         PAGE_LOAD_FAILED,
+         NO_MEDIA_FOUND,
+-        CANCELLED
++        CANCELLED,
++        INVALID_URL
+     }
+ }
+ 
+@@ -43,18 +44,34 @@
+     }
+     
+     @SuppressLint("SetJavaScriptEnabled")
+-    suspend fun extractMedia(url: String): ExtractionResult = withContext(Dispatchers.Main) {
+-        try {
+-            withTimeout(EXTRACTION_TIMEOUT_MS) {
+-                extractMediaInternal(url)
+-            }
+-        } catch (e: TimeoutCancellationException) {
+-            ExtractionResult.Error("Extraction timed out", ExtractionResult.ErrorType.TIMEOUT)
+-        } catch (e: CancellationException) {
+-            throw e
+-        } catch (e: Exception) {
+-            ExtractionResult.Error(e.message ?: "Unknown error", ExtractionResult.ErrorType.PAGE_LOAD_FAILED)
+-        }
++    suspend fun extractMedia(url: String): ExtractionResult {
++        if (!isValidPageUrl(url)) {
++            return ExtractionResult.Error("Enter a valid HTTP or HTTPS website URL", ExtractionResult.ErrorType.INVALID_URL)
++        }
++
++        return withContext(Dispatchers.Main) {
++            try {
++                withTimeout(EXTRACTION_TIMEOUT_MS) {
++                    extractMediaInternal(url)
++                }
++            } catch (e: TimeoutCancellationException) {
++                // Do not swallow cancellation initiated by a parent coroutine or navigation change.
++                currentCoroutineContext().ensureActive()
++                ExtractionResult.Error("Extraction timed out", ExtractionResult.ErrorType.TIMEOUT)
++            } catch (e: CancellationException) {
++                throw e
++            } catch (e: Exception) {
++                ExtractionResult.Error(e.message ?: "Unknown error", ExtractionResult.ErrorType.PAGE_LOAD_FAILED)
++            }
++        }
++    }
++
++    private fun isValidPageUrl(value: String): Boolean {
++        val uri = runCatching { java.net.URI(value.trim()) }.getOrNull() ?: return false
++        return uri.scheme?.lowercase() in setOf("http", "https") &&
++            !uri.host.isNullOrBlank() &&
++            uri.rawUserInfo == null &&
++            (uri.port == -1 || uri.port in 1..65535)
+     }
+     
+     @SuppressLint("SetJavaScriptEnabled")
+
+--- a/app/src/test/java/io/github/aedev/flow/providers/EpornerProviderTest.kt
++++ b/app/src/test/java/io/github/aedev/flow/providers/EpornerProviderTest.kt
+@@ -0,0 +1,177 @@
++package io.github.aedev.flow.providers
++
++import kotlinx.coroutines.runBlocking
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertThrows
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import java.io.ByteArrayInputStream
++import java.io.IOException
++import java.net.HttpURLConnection
++import java.net.URL
++
++class EpornerProviderTest {
++    @Test
++    fun `provider metadata satisfies the complete provider info contract`() {
++        val info = EpornerProvider().getInfo(enabled = true)
++
++        assertEquals("Eporner", info.name)
++        assertEquals("eporner", info.value)
++        assertEquals("1.0", info.version)
++        assertEquals("Eporner video provider", info.description)
++        assertTrue(info.icon.startsWith("https://"))
++        assertTrue(info.enabled)
++    }
++
++    @Test
++    fun `site page URLs require HTTPS and the Eporner host`() {
++        val provider = EpornerProvider()
++
++        assertEquals("www.eporner.com", provider.validateSitePageUrl("https://www.eporner.com/hd-porn/example/").host)
++        assertThrows(IllegalArgumentException::class.java) {
++            provider.validateSitePageUrl("http://www.eporner.com/hd-porn/example/")
++        }
++        assertThrows(IllegalArgumentException::class.java) {
++            provider.validateSitePageUrl("https://eporner.com.evil.example/video/")
++        }
++        assertThrows(IllegalArgumentException::class.java) {
++            provider.validateSitePageUrl("https://user@www.eporner.com/video/")
++        }
++    }
++
++    @Test
++    fun `search URL encodes query characters instead of replacing spaces with hyphens`() {
++        val provider = EpornerProvider()
++        val searchUrl = provider.searchUrl("cats and dogs & birds", 2)
++
++        assertTrue(searchUrl.contains("cats+and+dogs+%26+birds"))
++        assertTrue(searchUrl.endsWith("/2/"))
++    }
++
++    @Test
++    fun `catalogue parsing resolves links and deduplicates matching anchors`() {
++        val provider = EpornerProvider()
++        val html = """
++            <div>
++              <a href="/hd-porn/video-one/"><img alt="One &amp; Only" data-src="/thumb-one.jpg"></a>
++              <a href="/hd-porn/video-one/"><img alt="Duplicate" src="/duplicate.jpg"></a>
++              <a href="/hd-porn/video-two/"><img alt="Two" src="https://cdn.example/two.webp"></a>
++            </div>
++        """.trimIndent()
++
++        val posts = provider.parsePosts(html)
++
++        assertEquals(2, posts.size)
++        assertEquals("One & Only", posts.first().title)
++        assertEquals("https://www.eporner.com/hd-porn/video-one/", posts.first().link)
++        assertEquals("https://www.eporner.com/thumb-one.jpg", posts.first().image)
++    }
++
++    @Test
++    fun `direct media links are returned without opening an HTTP connection`() = runBlocking {
++        var openedConnection = false
++        val provider = EpornerProvider {
++            openedConnection = true
++            throw AssertionError("A direct stream must not be fetched as HTML")
++        }
++
++        val streams = provider.getStream("https://cdn.example/path/video.m3u8?token=abc")
++
++        assertFalse(openedConnection)
++        assertEquals(1, streams.size)
++        assertEquals("m3u8", streams.single().type)
++        assertEquals("https://cdn.example/path/video.m3u8?token=abc", streams.single().link)
++        assertNotNull(streams.single().headers?.get("Referer"))
++    }
++
++    @Test
++    fun `stream extraction normalizes escaped links filters previews and deduplicates`() {
++        val provider = EpornerProvider()
++        val html = """
++            source: "https:\/\/cdn.example\/media\/main.mp4?token=1\u0026x=2";
++            source2: "https://cdn.example/media/main.mp4?token=1&x=2";
++            preview: "https://cdn.example/media/preview.mp4";
++            hls: "https://cdn.example/media/master.m3u8";
++        """.trimIndent()
++
++        val streams = provider.extractStreams(html, "https://www.eporner.com/hd-porn/example/")
++
++        assertEquals(2, streams.size)
++        assertEquals("mp4", streams[0].type)
++        assertEquals("https://cdn.example/media/main.mp4?token=1&x=2", streams[0].link)
++        assertEquals("m3u8", streams[1].type)
++        assertEquals("https://www.eporner.com/hd-porn/example/", streams[0].headers?.get("Referer"))
++    }
++
++    @Test
++    fun `HTTP failure still disconnects the connection`() = runBlocking {
++        lateinit var connection: StubConnection
++        val provider = EpornerProvider { url ->
++            StubConnection(url, 403, "forbidden").also { connection = it }
++        }
++
++        val error = try {
++            provider.getPosts()
++            throw AssertionError("Expected the HTTP failure to be propagated")
++        } catch (expected: ProviderOperationException) {
++            expected
++        }
++
++        assertTrue(error.message.orEmpty().contains("Eporner catalogue loading failed"))
++        assertTrue(error.cause is IOException)
++        assertTrue(connection.wasDisconnected)
++    }
++
++    @Test
++    fun `redirect to a non Eporner host is rejected and connection is closed`() = runBlocking {
++        lateinit var connection: StubConnection
++        val provider = EpornerProvider { url ->
++            StubConnection(url, 302, "").also {
++                it.redirectLocation = "https://evil.example/redirected"
++                connection = it
++            }
++        }
++
++        val error = try {
++            provider.getPosts()
++            throw AssertionError("Expected external redirect to be rejected")
++        } catch (expected: ProviderOperationException) {
++            expected
++        }
++
++        assertTrue(error.cause is IllegalArgumentException)
++        assertTrue(connection.wasDisconnected)
++    }
++
++    @Test
++    fun `successful HTTP response disconnects after reading`() = runBlocking {
++        lateinit var connection: StubConnection
++        val provider = EpornerProvider { url ->
++            StubConnection(url, 200, "<html></html>").also { connection = it }
++        }
++
++        assertTrue(provider.getPosts().isEmpty())
++        assertTrue(connection.wasDisconnected)
++        assertEquals(10_000, connection.connectTimeout)
++        assertEquals(15_000, connection.readTimeout)
++    }
++
++    private class StubConnection(
++        url: URL,
++        private val status: Int,
++        private val body: String
++    ) : HttpURLConnection(url) {
++        var wasDisconnected = false
++            private set
++        var redirectLocation: String? = null
++
++        override fun connect() = Unit
++        override fun disconnect() { wasDisconnected = true }
++        override fun usingProxy(): Boolean = false
++        override fun getResponseCode(): Int = status
++        override fun getHeaderField(name: String?): String? = if (name.equals("Location", ignoreCase = true)) redirectLocation else null
++        override fun getInputStream() = ByteArrayInputStream(body.toByteArray(Charsets.UTF_8))
++    }
++}
+
+--- a/app/src/test/java/io/github/aedev/flow/providers/UnifiedCatalogueRepositoryTest.kt
++++ b/app/src/test/java/io/github/aedev/flow/providers/UnifiedCatalogueRepositoryTest.kt
+@@ -0,0 +1,179 @@
++package io.github.aedev.flow.providers
++
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.test.runTest
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class UnifiedCatalogueRepositoryTest {
++    @Test
++    fun `one failed provider does not discard another provider successful results`() = runTest {
++        val good = FakeProvider("Good", "good", posts = listOf(Post("Video", "https://good.example/video", "")))
++        val bad = FakeProvider("Bad", "bad", postsFailure = IllegalStateException("network down"))
++        val repository = repository(listOf(good, bad), setOf("good", "bad"))
++
++        val result = repository.getHomeFeed()
++
++        assertEquals(1, result.items.size)
++        assertEquals("good", result.items.single().providerId)
++        assertEquals(1, result.errors.size)
++        assertTrue(result.errors.single().contains("Bad"))
++        assertTrue(result.errors.single().contains("network down"))
++    }
++
++    @Test
++    fun `legitimate empty catalogue has no provider errors`() = runTest {
++        val empty = FakeProvider("Empty", "empty")
++        val result = repository(listOf(empty), setOf("empty")).getHomeFeed()
++
++        assertTrue(result.items.isEmpty())
++        assertTrue(result.errors.isEmpty())
++    }
++
++    @Test
++    fun `cancellation is propagated instead of being reported as provider failure`() = runTest {
++        val cancelled = FakeProvider("Cancelled", "cancelled", postsFailure = CancellationException("caller cancelled"))
++        val repository = repository(listOf(cancelled), setOf("cancelled"))
++
++        assertSuspendThrows(CancellationException::class.java) {
++            repository.getHomeFeed()
++        }
++    }
++
++    @Test
++    fun `providers without catalogue capability are not queried`() = runTest {
++        val webView = FakeProvider("WebView", "webview", catalogue = false)
++        val result = repository(listOf(webView), setOf("webview")).getHomeFeed()
++
++        assertEquals(0, webView.postsCalls)
++        assertTrue(result.items.isEmpty())
++        assertTrue(result.errors.isEmpty())
++    }
++
++    @Test
++    fun `disabled provider cannot serve direct catalogue requests`() = runTest {
++        val provider = FakeProvider("Disabled", "disabled")
++        val repository = repository(listOf(provider), emptySet())
++
++        assertSuspendThrows(ProviderUnavailableException::class.java) {
++            repository.getProviderPosts("disabled")
++        }
++        assertEquals(0, provider.postsCalls)
++    }
++
++    @Test
++    fun `disabled provider cannot serve direct search requests`() = runTest {
++        val provider = FakeProvider("Disabled", "disabled")
++        val repository = repository(listOf(provider), emptySet())
++
++        assertSuspendThrows(ProviderUnavailableException::class.java) {
++            repository.searchProvider("disabled", "cats")
++        }
++        assertEquals(0, provider.searchCalls)
++    }
++
++    @Test
++    fun `unsupported catalogue providers reject direct feed calls clearly`() = runTest {
++        val provider = FakeProvider("WebView", "webview", catalogue = false)
++        val repository = repository(listOf(provider), setOf("webview"))
++
++        assertSuspendThrows(ProviderOperationException::class.java) {
++            repository.getProviderPosts("webview")
++        }
++        assertEquals(0, provider.postsCalls)
++    }
++
++    @Test
++    fun `disabled provider cannot serve metadata`() = runTest {
++        val provider = FakeProvider("Disabled", "disabled")
++        val repository = repository(listOf(provider), emptySet())
++        val item = ProviderCatalogueItem("disabled", "Disabled", Post("Video", "https://example.com/video", ""))
++
++        assertSuspendThrows(ProviderUnavailableException::class.java) {
++            repository.getDetails(item)
++        }
++        assertEquals(0, provider.metaCalls)
++    }
++
++    @Test
++    fun `disabled provider cannot resolve playback streams`() = runTest {
++        val provider = FakeProvider("Disabled", "disabled")
++        val repository = repository(listOf(provider), emptySet())
++        val item = ProviderCatalogueItem("disabled", "Disabled", Post("Video", "https://example.com/video", ""))
++
++        assertSuspendThrows(ProviderUnavailableException::class.java) {
++            repository.getStreams(item)
++        }
++        assertEquals(0, provider.streamCalls)
++    }
++
++    @Test
++    fun `catalogue deduplicates identical posts from the same provider`() = runTest {
++        val post = Post("Video", "https://example.com/video", "")
++        val provider = FakeProvider("Test", "test", posts = listOf(post, post))
++        val result = repository(listOf(provider), setOf("test")).getHomeFeed()
++
++        assertEquals(1, result.items.size)
++    }
++
++    private suspend fun <T : Throwable> assertSuspendThrows(
++        expected: Class<T>,
++        block: suspend () -> Any?
++    ): T {
++        try {
++            block()
++        } catch (error: Throwable) {
++            if (expected.isInstance(error)) return expected.cast(error)
++            throw error
++        }
++        throw AssertionError("Expected ${expected.simpleName} to be thrown")
++    }
++
++    private fun repository(providers: List<Provider>, enabled: Set<String>) =
++        UnifiedCatalogueRepository(
++            enabledProviders = { providers },
++            providerLookup = { id -> providers.firstOrNull { it.value == id } },
++            isProviderEnabled = { it in enabled }
++        )
++
++    private class FakeProvider(
++        override val name: String,
++        override val value: String,
++        private val posts: List<Post> = emptyList(),
++        private val postsFailure: Throwable? = null,
++        catalogue: Boolean = true
++    ) : Provider {
++        override val version = "test"
++        override val description = "test provider"
++        override val icon = ""
++        override val supportsCatalogue = catalogue
++        override val supportsSearch = catalogue
++
++        var postsCalls = 0
++        var searchCalls = 0
++        var metaCalls = 0
++        var streamCalls = 0
++
++        override suspend fun getPosts(page: Int): List<Post> {
++            postsCalls++
++            postsFailure?.let { throw it }
++            return posts
++        }
++
++        override suspend fun getSearchPosts(query: String, page: Int): List<Post> {
++            searchCalls++
++            return posts
++        }
++
++        override suspend fun getMeta(link: String): Info {
++            metaCalls++
++            return Info("Title", "", "", "", "movie", emptyList())
++        }
++
++        override suspend fun getStream(link: String): List<Stream> {
++            streamCalls++
++            return listOf(Stream("Test", "https://cdn.example/video.mp4", "mp4"))
++        }
++    }
++}
+
+--- a/app/src/test/java/io/github/aedev/flow/providers/WebViewProviderUrlTest.kt
++++ b/app/src/test/java/io/github/aedev/flow/providers/WebViewProviderUrlTest.kt
+@@ -0,0 +1,120 @@
++package io.github.aedev.flow.providers
++
++import androidx.test.core.app.ApplicationProvider
++import android.content.Context
++import io.github.aedev.flow.webview.ExtractionResult
++import io.github.aedev.flow.webview.MediaCandidate
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.runBlocking
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++
++@RunWith(RobolectricTestRunner::class)
++class WebViewProviderUrlTest {
++    private val context: Context
++        get() = ApplicationProvider.getApplicationContext()
++
++    @Test
++    fun `bare website URL is normalized to HTTPS`() {
++        assertEquals(
++            "https://example.com/watch?id=42",
++            WebViewProvider.normalizeInputUrl(" example.com/watch?id=42 ")
++        )
++    }
++
++    @Test
++    fun `explicit HTTP and HTTPS URLs are preserved`() {
++        assertEquals("http://example.com/video", WebViewProvider.normalizeInputUrl("http://example.com/video"))
++        assertEquals("https://example.com/video", WebViewProvider.normalizeInputUrl("https://example.com/video"))
++    }
++
++    @Test
++    fun `non web schemes and malformed URLs are rejected`() {
++        assertNull(WebViewProvider.normalizeInputUrl("javascript:alert(1)"))
++        assertNull(WebViewProvider.normalizeInputUrl("file:///etc/passwd"))
++        assertNull(WebViewProvider.normalizeInputUrl("https://user:pass@example.com/video"))
++        assertNull(WebViewProvider.normalizeInputUrl("https:///missing-host"))
++        assertNull(WebViewProvider.normalizeInputUrl("   "))
++    }
++
++    @Test
++    fun `normalized URL has a host and HTTP scheme`() {
++        val normalized = WebViewProvider.normalizeInputUrl("example.com")
++        assertTrue(normalized.orEmpty().startsWith("https://"))
++    }
++
++    @Test
++    fun `extractor failures are surfaced instead of becoming empty stream lists`() = runBlocking {
++        val provider = WebViewProvider(context) {
++            ExtractionResult.Error("No media found", ExtractionResult.ErrorType.NO_MEDIA_FOUND)
++        }
++
++        val error = assertSuspendThrows(ProviderOperationException::class.java) {
++            provider.getStream("example.com/watch")
++        }
++
++        assertTrue(error.message.orEmpty().contains("WebView stream extraction"))
++        assertTrue(error.message.orEmpty().contains("No media found"))
++    }
++
++    @Test
++    fun `successful extraction retains referer user agent and cookies`() = runBlocking {
++        val candidate = MediaCandidate(
++            url = "https://cdn.example/video.mp4",
++            type = "mp4",
++            sourcePage = "https://example.com/watch",
++            userAgent = "TestAgent",
++            referer = "https://example.com/watch",
++            cookies = "session=abc"
++        )
++        val provider = WebViewProvider(context) { ExtractionResult.Success(listOf(candidate)) }
++
++        val stream = provider.getStream("example.com/watch").single()
++
++        assertEquals(candidate.url, stream.link)
++        assertEquals("TestAgent", stream.headers?.get("User-Agent"))
++        assertEquals(candidate.referer, stream.headers?.get("Referer"))
++        assertEquals("session=abc", stream.headers?.get("Cookie"))
++    }
++
++    @Test
++    fun `invalid URL is rejected before extraction starts`() = runBlocking {
++        var extractorCalled = false
++        val provider = WebViewProvider(context) {
++            extractorCalled = true
++            ExtractionResult.Success(emptyList())
++        }
++
++        assertSuspendThrows(ProviderOperationException::class.java) {
++            provider.getStream("javascript:alert(1)")
++        }
++        assertFalse(extractorCalled)
++    }
++
++    @Test
++    fun `cancellation from the extractor is propagated`() = runBlocking {
++        val provider = WebViewProvider(context) { throw CancellationException("caller cancelled") }
++
++        assertSuspendThrows(CancellationException::class.java) {
++            provider.getStream("example.com/watch")
++        }
++    }
++
++    private suspend fun <T : Throwable> assertSuspendThrows(
++        expected: Class<T>,
++        block: suspend () -> Any?
++    ): T {
++        try {
++            block()
++        } catch (error: Throwable) {
++            if (expected.isInstance(error)) return expected.cast(error)
++            throw error
++        }
++        throw AssertionError("Expected ${expected.simpleName} to be thrown")
++    }
++}
+
