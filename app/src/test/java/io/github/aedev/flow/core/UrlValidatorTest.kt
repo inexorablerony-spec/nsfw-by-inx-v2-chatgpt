@@ -40,6 +40,16 @@ class UrlValidatorTest {
     }
 
     @Test
+    fun `rejects multicast`() {
+        assertFalse(UrlValidator.isAllowed("http://224.0.0.1/test"))
+    }
+
+    @Test
+    fun `rejects reserved`() {
+        assertFalse(UrlValidator.isAllowed("http://240.0.0.1/test"))
+    }
+
+    @Test
     fun `rejects file scheme`() {
         assertFalse(UrlValidator.isAllowed("file:///etc/passwd"))
     }

@@ -18,7 +18,8 @@ import javax.inject.Singleton
 
 @Singleton
 class AdultHideoutCoreManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val installer: BinaryInstaller
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(CoreState.STOPPED)
@@ -94,21 +95,22 @@ class AdultHideoutCoreManager @Inject constructor(
 
     private fun getVerifiedBinaryPath(): String? {
         val file = File(context.filesDir, "libadulthideout_core.so")
-        if (!file.exists() || file.length() < 100000) return null
+        if (!installer.verifyFile(file)) return null
         return file.absolutePath
     }
 
     private fun checkHealth(): Boolean {
+        var conn: java.net.HttpURLConnection? = null
         return try {
             val url = java.net.URL("http://127.0.0.1:8191/health")
-            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn = url.openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 500
             conn.readTimeout = 500
-            val result = conn.responseCode == 200
-            conn.disconnect()
-            result
+            conn.responseCode == 200
         } catch (e: Exception) {
             false
+        } finally {
+            conn?.disconnect()
         }
     }
 

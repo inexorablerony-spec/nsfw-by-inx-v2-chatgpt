@@ -3,6 +3,7 @@ package io.github.aedev.flow.core
 import android.content.Context
 import android.os.Build
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -18,14 +19,12 @@ class BinaryInstaller @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
-        // Pinned to specific commit, not master
-        const val BINARY_COMMIT = "a1b2c3d4e5f6" // TODO: Replace with actual commit SHA
+        const val BINARY_COMMIT = "6ff2f7a9f076b923014bff3059a34471258af6e3"
         const val BINARY_URL = "https://raw.githubusercontent.com/Vashiel/repository.adulthideout/$BINARY_COMMIT/core-binaries/android-arm64-v8a/libadulthideout_core.so"
-        const val EXPECTED_SHA256 = "c4a8a8d1e046cab6a42934b8fba31246efb21a002a90beb2bffa555623a383a9"
+        const val EXPECTED_SHA256 = "da6b7a9c8d698a88ccc09d8bd03ff925c993c0f4e6b9e2e012d0985a356f37b6"
         const val MAX_SIZE = 10 * 1024 * 1024
         const val CONNECT_TIMEOUT = 30000
         const val READ_TIMEOUT = 60000
-        // ELF magic and ARM64 machine type
         val ELF_MAGIC = byteArrayOf(0x7f, 0x45, 0x4c, 0x46)
         const val ELF_MACHINE_AARCH64 = 183
     }
@@ -36,32 +35,63 @@ class BinaryInstaller @Inject constructor(
         val finalFile = File(context.filesDir, "libadulthideout_core.so")
         val backupFile = File(context.filesDir, "libadulthideout_core.so.bak")
 
-        // Always verify existing file
+        if (finalFile.exists() && verifyFile(finalFile)) {
+            return@withContext true
+        }
+
         if (finalFile.exists()) {
-            if (verifyFile(finalFile)) return@withContext true
-            // Invalid existing file - backup and re-download
             finalFile.renameTo(backupFile)
         }
 
         val tempFile = File(context.filesDir, "libadulthideout_core.so.tmp")
+        var conn: HttpURLConnection? = null
         try {
-            download(tempFile)
+            conn = URL(BINARY_URL).openConnection() as HttpURLConnection
+            conn.connectTimeout = CONNECT_TIMEOUT
+            conn.readTimeout = READ_TIMEOUT
+            conn.connect()
+
+            if (conn.responseCode != 200) {
+                throw IllegalStateException("HTTP ${conn.responseCode}")
+            }
+
+            conn.inputStream.use { input ->
+                tempFile.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    var total = 0L
+                    var read: Int
+                    while (input.read(buffer).also { read = it } != -1) {
+                        total += read
+                        if (total > MAX_SIZE) throw IllegalStateException("Exceeded size limit")
+                        output.write(buffer, 0, read)
+                    }
+                }
+            }
+
             if (!verifyFile(tempFile)) {
                 tempFile.delete()
                 restoreBackup(backupFile, finalFile)
                 return@withContext false
             }
+
             if (!tempFile.renameTo(finalFile)) {
                 tempFile.delete()
                 restoreBackup(backupFile, finalFile)
                 return@withContext false
             }
+
             backupFile.delete()
             true
+        } catch (e: CancellationException) {
+            tempFile.delete()
+            restoreBackup(backupFile, finalFile)
+            throw e
         } catch (e: Exception) {
             tempFile.delete()
             restoreBackup(backupFile, finalFile)
             false
+        } finally {
+            conn?.disconnect()
         }
     }
 
@@ -70,32 +100,13 @@ class BinaryInstaller @Inject constructor(
         return file.exists() && verifyFile(file)
     }
 
-    private fun isArm64(): Boolean = Build.SUPPORTED_ABIS.contains("arm64-v8a")
-
-    private fun download(target: File) {
-        val conn = URL(BINARY_URL).openConnection() as HttpURLConnection
-        conn.connectTimeout = CONNECT_TIMEOUT
-        conn.readTimeout = READ_TIMEOUT
-        conn.inputStream.use { input ->
-            target.outputStream().use { output ->
-                val buffer = ByteArray(8192)
-                var total = 0L
-                var read: Int
-                while (input.read(buffer).also { read = it } != -1) {
-                    total += read
-                    if (total > MAX_SIZE) throw IllegalStateException("Exceeded size limit")
-                    output.write(buffer, 0, read)
-                }
-            }
-        }
-        conn.disconnect()
-    }
-
-    private fun verifyFile(file: File): Boolean {
+    fun verifyFile(file: File): Boolean {
         if (!file.exists() || file.length() < 100000) return false
         if (!verifyElfArch(file)) return false
         return verifyChecksum(file)
     }
+
+    private fun isArm64(): Boolean = Build.SUPPORTED_ABIS.contains("arm64-v8a")
 
     private fun verifyElfArch(file: File): Boolean {
         return try {
