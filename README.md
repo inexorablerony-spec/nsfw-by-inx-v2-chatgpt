@@ -152,8 +152,7 @@ Each release has six APKs: three device types, each in a GitHub build and a FOSS
 | Your device | GitHub build | FOSS build |
 | :--- | :--- | :--- |
 | Most phones and tablets (64-bit, `arm64-v8a`) | `flow-arm64-v8a.apk` | `flow-foss-arm64-v8a.apk` |
-| Older 32-bit phones (`armeabi-v7a`) | `flow-armeabi-v7a.apk` | `flow-foss-armeabi-v7a.apk` |
-| Any device (universal, larger download) | `flow.apk` | `flow-foss.apk` |
+| ARM64 devices | `flow.apk` | `flow-foss.apk` |
 
 - **Not sure?** `flow-arm64-v8a.apk` works on almost every phone. `flow.apk` works on all of them.
 - **GitHub build:** updates itself from inside the app and supports Discord Rich Presence.
