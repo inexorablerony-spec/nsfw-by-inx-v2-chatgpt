@@ -56,7 +56,8 @@ class DiscordTokenStoreInstrumentedTest {
         assertFalse(androidKeyStore().containsAlias("flow_discord_tokens_v1"))
     }
 
-    private fun androidKeyStore(): KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
-        load(null)
-    }
+    private fun androidKeyStore(): KeyStore =
+        KeyStore.getInstance("AndroidKeyStore").apply {
+            load(null)
+        }
 }

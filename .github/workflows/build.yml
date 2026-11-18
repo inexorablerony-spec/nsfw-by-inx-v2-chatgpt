@@ -430,15 +430,49 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleGithubDebug --build-cache --stacktrace
 
-      - name: Rename debug APK
+      - name: Select and verify ARM64 APK
         run: |
+          set -euo pipefail
           mkdir -p dist-debug
-          apk=$(find app/build/outputs/apk/github/debug -name "*.apk" -type f | head -1)
+          
+          # Find ARM64-specific APK
+          apk=$(find app/build/outputs/apk/github/debug -name "*arm64*.apk" -type f | head -1)
           if [ -z "$apk" ]; then
+            # Fallback to any APK if no ARM64-specific found
+            apk=$(find app/build/outputs/apk/github/debug -name "*.apk" -type f | head -1)
+          fi
+          
+          if [ -z "$apk" ] || [ ! -f "$apk" ]; then
             echo "::error::No debug APK found"
             exit 1
           fi
           echo "Found APK: $apk"
+          
+          # Verify package ID
+          aapt=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt -type f | sort -V | tail -1)
+          pkg=$("$aapt" dump badging "$apk" | grep -o "package: name='[^']*'" | cut -d"'" -f2)
+          if [ "$pkg" != "io.github.inx.goonhub" ]; then
+            echo "::error::Expected package io.github.inx.goonhub, got $pkg"
+            exit 1
+          fi
+          echo "Package ID verified: $pkg"
+          
+          # Verify ARM64 ABI
+          abis=$("$aapt" dump badging "$apk" | grep -o "native-code: '[^']*'" | cut -d"'" -f2)
+          if [[ ! "$abis" =~ "arm64-v8a" ]]; then
+            echo "::error::Expected arm64-v8a ABI, got $abis"
+            exit 1
+          fi
+          echo "ABI verified: $abis"
+          
+          # Verify signature
+          apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort -V | tail -1)
+          if ! "$apksigner" verify "$apk" > /dev/null 2>&1; then
+            echo "::error::APK signature verification failed"
+            exit 1
+          fi
+          echo "Signature verified"
+          
           cp "$apk" dist-debug/goonhub-debug-arm64.apk
           ls -la dist-debug/
 
