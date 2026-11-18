@@ -56,7 +56,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "io.github.aedev.flow"
+        applicationId = "io.github.inx.goonhub"
         minSdk = 26
         targetSdk = 36
         versionCode = 20
