@@ -27,10 +27,6 @@
     <uses-permission
         android:name="android.permission.READ_MEDIA_VIDEO"
         android:minSdkVersion="33" />
-    <!-- Required for reading local audio/music files on Android 13+ -->
-    <uses-permission
-        android:name="android.permission.READ_MEDIA_AUDIO"
-        android:minSdkVersion="33" />
     <!-- Android 14+: lets the local library work when the viewer picks "Select photos and videos" -->
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <!-- Optional: allows saving downloads to public Movies/Music folders (survives app uninstall) -->
@@ -45,10 +41,6 @@
         (Referenced in-app via PowerManager.isIgnoringBatteryOptimizations check.)
     -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- Microphone capture for music recognition (Shazam) -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <!-- Device Sync (FLOW-SYNC/1): resolve the host LAN IP for the QR code. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -144,69 +136,6 @@
             android:windowSoftInputMode="adjustResize"
             android:windowLayoutInDisplayCutoutMode="shortEdges">
 
-            <!-- Deep Links for YouTube URLs -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="http" />
-                <data android:scheme="https" />
-                <data android:host="www.youtube.com" />
-                <data android:host="youtube.com" />
-                <data android:host="m.youtube.com" />
-                <data android:host="music.youtube.com" />
-                <data android:host="m.music.youtube.com" />
-                <data android:pathPrefix="/watch" />
-                <data android:pathPrefix="/v" />
-                <data android:pathPrefix="/live" />
-                <data android:pathPrefix="/embed" />
-                <data android:pathPrefix="/shorts" />
-                <data android:pathPrefix="/playlist" />
-                <data android:pathPrefix="/browse" />
-                <data android:pathPrefix="/channel" />
-                <data android:pathPrefix="/c" />
-                <data android:pathPrefix="/user" />
-                <data android:pathPrefix="/@" />
-            </intent-filter>
-
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="http" />
-                <data android:scheme="https" />
-                <data android:host="www.youtube-nocookie.com" />
-                <data android:host="youtube-nocookie.com" />
-                <data android:pathPrefix="/embed" />
-            </intent-filter>
-
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="http" />
-                <data android:scheme="https" />
-                <data android:host="youtu.be" />
-            </intent-filter>
-
-            <!-- Piped frontend links (same video IDs as YouTube) -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="http" />
-                <data android:scheme="https" />
-                <data android:host="piped.video" />
-                <data android:host="www.piped.video" />
-                <data android:pathPrefix="/watch" />
-                <data android:pathPrefix="/playlist" />
-                <data android:pathPrefix="/shorts" />
-            </intent-filter>
-
             <!-- Share Intent for text/plain -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -223,17 +152,6 @@
             </intent-filter>
         </activity>
         
-        <!-- Media3 Music Service -->
-        <service
-            android:name=".service.Media3MusicService"
-            android:foregroundServiceType="mediaPlayback"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="androidx.media3.session.MediaLibraryService"/>
-                <action android:name="android.media.browse.MediaBrowserService"/>
-            </intent-filter>
-        </service>
-        
         <!-- Video Playback Service (Media3 MediaSessionService) for background playback and media controls -->
         <service
             android:name=".service.VideoPlayerService"
@@ -244,16 +162,6 @@
                 <action android:name="androidx.media3.session.MediaSessionService"/>
             </intent-filter>
         </service>
-
-        <!-- Media3 playback resumption: a headset's Play after Flow was killed reaches the music
-             service (the only MediaLibraryService), which resumes the saved queue. -->
-        <receiver
-            android:name="androidx.media3.session.MediaButtonReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MEDIA_BUTTON" />
-            </intent-filter>
-        </receiver>
 
         <!-- The download queue runs as WorkManager work; its foreground service carries dataSync. -->
         <service
@@ -307,24 +215,6 @@
         <receiver
             android:name=".widget.core.action.WidgetPlaybackReceiver"
             android:exported="false" />
-        <!-- Opened by the music service over the lock screen while the setting is on (#1859). -->
-        <activity
-            android:name=".ui.screens.lockscreen.LockScreenPlayerActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:launchMode="singleInstance"
-            android:taskAffinity="${applicationId}.lockscreen"
-            android:theme="@style/Theme.Flow" />
-        <activity
-            android:name=".widget.config.WidgetConfigActivity"
-            android:exported="true"
-            android:excludeFromRecents="true"
-            android:taskAffinity=""
-            android:theme="@style/Theme.Flow">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
-            </intent-filter>
-        </activity>
         <receiver
             android:name=".widget.nowplaying.NowPlayingWidgetReceiver"
             android:exported="true"
