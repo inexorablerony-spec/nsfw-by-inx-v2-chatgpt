@@ -25,12 +25,12 @@ import kotlin.math.roundToInt
  * Helper class for Picture-in-Picture mode support
  */
 object PictureInPictureHelper {
-    const val ACTION_PLAY = "io.github.aedev.flow.action.PIP_PLAY"
-    const val ACTION_PAUSE = "io.github.aedev.flow.action.PIP_PAUSE"
-    const val ACTION_PREVIOUS = "io.github.aedev.flow.action.PIP_PREVIOUS"
-    const val ACTION_NEXT = "io.github.aedev.flow.action.PIP_NEXT"
-    const val ACTION_CLOSE = "io.github.aedev.flow.action.PIP_CLOSE"
-    const val ACTION_BACKGROUND = "io.github.aedev.flow.action.PIP_BACKGROUND"
+    const val ACTION_PLAY = "io.github.inx.goonhub.action.PIP_PLAY"
+    const val ACTION_PAUSE = "io.github.inx.goonhub.action.PIP_PAUSE"
+    const val ACTION_PREVIOUS = "io.github.inx.goonhub.action.PIP_PREVIOUS"
+    const val ACTION_NEXT = "io.github.inx.goonhub.action.PIP_NEXT"
+    const val ACTION_CLOSE = "io.github.inx.goonhub.action.PIP_CLOSE"
+    const val ACTION_BACKGROUND = "io.github.inx.goonhub.action.PIP_BACKGROUND"
 
     private const val REQUEST_CODE_PLAY = 1
     private const val REQUEST_CODE_PAUSE = 2

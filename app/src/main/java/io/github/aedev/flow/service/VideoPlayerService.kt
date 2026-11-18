@@ -33,8 +33,8 @@ class VideoPlayerService : MediaSessionService() {
     companion object {
         private const val TAG = "VideoPlayerService"
         private const val LOCK_RELEASE_DELAY_MS = 30_000L
-        const val ACTION_SHOW_POPUP = "io.github.aedev.flow.action.SHOW_POPUP_PLAYER"
-        const val ACTION_HIDE_POPUP = "io.github.aedev.flow.action.HIDE_POPUP_PLAYER"
+        const val ACTION_SHOW_POPUP = "io.github.inx.goonhub.action.SHOW_POPUP_PLAYER"
+        const val ACTION_HIDE_POPUP = "io.github.inx.goonhub.action.HIDE_POPUP_PLAYER"
 
         const val EXTRA_VIDEO_ID = "video_id"
         const val EXTRA_VIDEO_TITLE = "video_title"
