@@ -10,9 +10,12 @@ import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import io.github.aedev.flow.core.CoreExtractionService
+import io.github.aedev.flow.core.CoreResolveRequest
 
 class EpornerProvider(
-    private val connectionFactory: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection }
+    private val connectionFactory: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection },
+    private val core: CoreExtractionService? = null
 ) : Provider {
     override val name = "Eporner"
     override val value = "eporner"
@@ -59,6 +62,19 @@ class EpornerProvider(
 
     override suspend fun getStream(link: String): List<Stream> = withContext(Dispatchers.IO) {
         runProviderOperation("stream resolution") {
+            // Try Core first if available
+            if (core?.ensureRunning() == true) {
+                val result = core.resolve(CoreResolveRequest(urls = listOf(link))).getOrNull()
+                if (result?.streamUrl != null) {
+                    return@runProviderOperation listOf(Stream(
+                        server = "Core",
+                        link = result.streamUrl,
+                        type = result.contentType ?: "unknown",
+                        headers = result.headers
+                    ))
+                }
+            }
+            // Fallback to existing extraction
             val directStream = directStreamOrNull(link)
             if (directStream != null) {
                 listOf(directStream)

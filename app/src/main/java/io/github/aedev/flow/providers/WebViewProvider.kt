@@ -5,11 +5,14 @@ import io.github.aedev.flow.webview.ExtractionResult
 import io.github.aedev.flow.webview.WebViewExtractor
 import kotlinx.coroutines.CancellationException
 import java.net.URI
+import io.github.aedev.flow.core.CoreExtractionService
+import io.github.aedev.flow.core.CoreResolveRequest
 
 /** A URL-based extractor, not a catalogue source. */
 class WebViewProvider(
     context: Context,
-    private val extractMedia: suspend (String) -> ExtractionResult = WebViewExtractor(context)::extractMedia
+    private val extractMedia: suspend (String) -> ExtractionResult = WebViewExtractor(context)::extractMedia,
+    private val core: CoreExtractionService? = null
 ) : Provider {
     override val name = "WebView"
     override val value = "webview"
@@ -33,6 +36,19 @@ class WebViewProvider(
         )
 
     override suspend fun getStream(link: String): List<Stream> {
+        // Try Core first if available
+        if (core?.ensureRunning() == true) {
+            val result = core.resolve(CoreResolveRequest(urls = listOf(link))).getOrNull()
+            if (result?.streamUrl != null) {
+                return listOf(Stream(
+                    server = "Core",
+                    link = result.streamUrl,
+                    type = result.contentType ?: "unknown",
+                    headers = result.headers
+                ))
+            }
+        }
+        
         val normalizedUrl = normalizeInputUrl(link)
             ?: throw ProviderOperationException(
                 name,

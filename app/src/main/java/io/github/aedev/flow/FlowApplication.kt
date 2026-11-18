@@ -35,6 +35,7 @@ import io.github.aedev.flow.notification.DailyLimitGuard
 import io.github.aedev.flow.notification.NotificationHelper
 import io.github.aedev.flow.player.PlaybackShutdown
 import io.github.aedev.flow.providers.ProviderRegistry
+import io.github.aedev.flow.core.CoreExtractionService
 import io.github.aedev.flow.player.SleepTimerManager
 import io.github.aedev.flow.sync2.service.LinkedCatchUp
 import io.github.aedev.flow.sync2.service.LinkedForeground
@@ -115,6 +116,9 @@ class FlowApplication :
     lateinit var appLock: AppLock
 
     @Inject
+    lateinit var coreExtractionService: CoreExtractionService
+
+    @Inject
     lateinit var linkedProfiles: dagger.Lazy<LinkedProfiles>
 
     @Inject
@@ -152,7 +156,7 @@ class FlowApplication :
 
         DiscordPresenceRuntime.initialize(this, okHttpClient)
         
-        ProviderRegistry.init(this)
+        ProviderRegistry.init(this, coreExtractionService)
 
         val playerPreferences = PlayerPreferences(this)
 

@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.ConcurrentHashMap
+import io.github.aedev.flow.core.CoreExtractionService
 
 data class ProviderRegistryState(
     val providers: List<ProviderInfo> = emptyList()
@@ -26,15 +27,15 @@ object ProviderRegistry {
     val state: StateFlow<ProviderRegistryState> = _state.asStateFlow()
     
     @Synchronized
-    fun init(ctx: Context) {
+    fun init(ctx: Context, core: CoreExtractionService? = null) {
         if (initialized) return
         prefs = ctx.getSharedPreferences("providers", Context.MODE_PRIVATE)
         
         loadPreferences()
         
         if (allProviders.isEmpty()) {
-            register(EpornerProvider())
-            register(WebViewProvider(ctx))
+            register(EpornerProvider(core = core))
+            register(WebViewProvider(ctx, core = core))
         }
         
         updateState()
