@@ -45,11 +45,11 @@ class NewPipeDownloader private constructor(context: Context) : Downloader() {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
 
         @Volatile
-        private var INSTANCE: NewPipeDownloader? = null
+        private var instance: NewPipeDownloader? = null
 
         fun getInstance(context: Context): NewPipeDownloader {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: NewPipeDownloader(context.applicationContext).also { INSTANCE = it }
+            return instance ?: synchronized(this) {
+                instance ?: NewPipeDownloader(context.applicationContext).also { instance = it }
             }
         }
     }
