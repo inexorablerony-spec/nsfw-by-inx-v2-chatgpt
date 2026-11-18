@@ -270,13 +270,11 @@ jobs:
           apks=()
           if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
             apks+=(
-              app/build/outputs/apk/github/release/app-github-universal-release.apk
               app/build/outputs/apk/github/release/app-github-arm64-v8a-release.apk
               app/build/outputs/apk/github/release/app-github-armeabi-v7a-release.apk
             )
           fi
           apks+=(
-            app/build/outputs/apk/foss/release/app-foss-universal-release.apk
             app/build/outputs/apk/foss/release/app-foss-arm64-v8a-release.apk
             app/build/outputs/apk/foss/release/app-foss-armeabi-v7a-release.apk
           )
@@ -307,7 +305,7 @@ jobs:
           NIGHTLY_SIGNED: ${{ steps.nightly_keystore.outputs.signed }}
         run: |
           set -euo pipefail
-          src=app/build/outputs/apk/github/nightly/app-github-universal-nightly.apk
+          src=app/build/outputs/apk/github/nightly/app-github-arm64-v8a-nightly.apk
           test -f "$src"
           if [ "$NIGHTLY_SIGNED" = "true" ]; then
             apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort -V | tail -1)
@@ -330,14 +328,12 @@ jobs:
           expected=3
           if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
             apks+=(
-              app/build/outputs/apk/github/release/app-github-universal-release*.apk
               app/build/outputs/apk/github/release/app-github-arm64-v8a-release*.apk
               app/build/outputs/apk/github/release/app-github-armeabi-v7a-release*.apk
             )
             expected=6
           fi
           apks+=(
-            app/build/outputs/apk/foss/release/app-foss-universal-release*.apk
             app/build/outputs/apk/foss/release/app-foss-arm64-v8a-release*.apk
             app/build/outputs/apk/foss/release/app-foss-armeabi-v7a-release*.apk
           )
