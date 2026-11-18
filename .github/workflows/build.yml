@@ -433,7 +433,14 @@ jobs:
       - name: Rename debug APK
         run: |
           mkdir -p dist-debug
-          cp app/build/outputs/apk/github/debug/app-github-debug.apk dist-debug/goonhub-debug-arm64.apk
+          apk=$(find app/build/outputs/apk/github/debug -name "*.apk" -type f | head -1)
+          if [ -z "$apk" ]; then
+            echo "::error::No debug APK found"
+            exit 1
+          fi
+          echo "Found APK: $apk"
+          cp "$apk" dist-debug/goonhub-debug-arm64.apk
+          ls -la dist-debug/
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v7

@@ -145,7 +145,6 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             buildConfigField("String", "UPDATE_CHANNEL", "\"stable\"")
             isDebuggable = true
