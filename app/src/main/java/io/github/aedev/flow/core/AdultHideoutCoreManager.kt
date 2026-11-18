@@ -2,7 +2,9 @@ package io.github.aedev.flow.core
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,7 +12,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.delay
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,14 +25,16 @@ class AdultHideoutCoreManager @Inject constructor(
     val state: StateFlow<CoreState> = _state.asStateFlow()
 
     suspend fun ensureRunning(timeoutMs: Long = 5000): Boolean = mutex.withLock {
-        if (_state.value == CoreState.RUNNING) return true
-        if (_state.value == CoreState.STARTING) return false
+        if (_state.value == CoreState.RUNNING && isNativeRunning()) return true
+        if (_state.value == CoreState.RUNNING && !isNativeRunning()) {
+            _state.value = CoreState.STOPPED
+        }
 
         _state.value = CoreState.STARTING
         return withContext(Dispatchers.IO) {
             try {
-                val binaryPath = getBinaryPath() ?: return@withContext fail()
-                
+                val binaryPath = getVerifiedBinaryPath() ?: return@withContext fail()
+
                 val loadResult = CoreNative.nativeLoad(binaryPath)
                 if (loadResult != 0) return@withContext fail()
 
@@ -47,29 +50,52 @@ class AdultHideoutCoreManager @Inject constructor(
                 } ?: false
 
                 if (!healthy) {
-                    CoreNative.nativeStop()
+                    safeStop()
                     return@withContext fail()
                 }
 
                 _state.value = CoreState.RUNNING
                 true
+            } catch (e: CancellationException) {
+                safeStop()
+                _state.value = CoreState.STOPPED
+                throw e
             } catch (e: Exception) {
-                CoreNative.nativeStop()
+                safeStop()
                 fail()
             }
         }
     }
 
-    fun shutdown() {
-        if (_state.value == CoreState.RUNNING) {
-            CoreNative.nativeStop()
+    suspend fun shutdown() = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            safeStop()
             _state.value = CoreState.STOPPED
         }
     }
 
-    private fun getBinaryPath(): String? {
+    private fun isNativeRunning(): Boolean {
+        return try {
+            CoreNative.nativeIsRunning() == 1
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun safeStop() {
+        try {
+            if (CoreNative.nativeIsLoaded()) {
+                CoreNative.nativeStop()
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+
+    private fun getVerifiedBinaryPath(): String? {
         val file = File(context.filesDir, "libadulthideout_core.so")
-        return if (file.exists() && file.length() > 100000) file.absolutePath else null
+        if (!file.exists() || file.length() < 100000) return null
+        return file.absolutePath
     }
 
     private fun checkHealth(): Boolean {
@@ -78,7 +104,9 @@ class AdultHideoutCoreManager @Inject constructor(
             val conn = url.openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 500
             conn.readTimeout = 500
-            conn.responseCode == 200
+            val result = conn.responseCode == 200
+            conn.disconnect()
+            result
         } catch (e: Exception) {
             false
         }
