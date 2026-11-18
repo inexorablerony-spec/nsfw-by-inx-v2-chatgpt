@@ -58,4 +58,15 @@ class UrlValidatorTest {
     fun `rejects malformed url`() {
         assertFalse(UrlValidator.isAllowed("not a url"))
     }
+
+    @Test
+    fun `rejects ipv6 loopback`() {
+        assertFalse(UrlValidator.isAllowed("http://[::1]/test"))
+    }
+
+    // Note: DNS rebinding protection requires connection-time validation,
+    // not just pre-request DNS resolution. This validator checks resolved
+    // addresses at request time but cannot prevent rebinding between
+    // validation and connection. Full protection requires a custom
+    // connection layer that pins the resolved address.
 }

@@ -7,6 +7,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.charset.StandardCharsets
 
 class CoreHttpClient {
     private val json = Json { ignoreUnknownKeys = true }
@@ -19,6 +20,7 @@ class CoreHttpClient {
             conn = URL("$baseUrl/health").openConnection() as HttpURLConnection
             conn.connectTimeout = 2000
             conn.readTimeout = 2000
+            conn.instanceFollowRedirects = false
             conn.responseCode == 200
         } catch (e: CancellationException) {
             throw e
@@ -39,12 +41,14 @@ class CoreHttpClient {
             conn.requestMethod = "POST"
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("Content-Type", "application/json")
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             conn.doOutput = true
-            conn.outputStream.use { it.write(json.encodeToString(request).toByteArray()) }
+            conn.outputStream.use { it.write(json.encodeToString(request).toByteArray(StandardCharsets.UTF_8)) }
 
             if (conn.responseCode != 200) {
-                return@withContext Result.failure(Exception("HTTP ${conn.responseCode}"))
+                val errorBody = readErrorBody(conn)
+                return@withContext Result.failure(CoreHttpException(conn.responseCode, errorBody))
             }
             val body = readBounded(conn)
             Result.success(json.decodeFromString<CoreResolveResult>(body))
@@ -60,16 +64,22 @@ class CoreHttpClient {
     suspend fun search(request: CoreSearchRequest): Result<CoreSearchResponse> = withContext(Dispatchers.IO) {
         var conn: HttpURLConnection? = null
         try {
+            // Validate any URLs in sources
+            if (request.sources.any { it.startsWith("http") && !UrlValidator.isAllowed(it) }) {
+                return@withContext Result.failure(IllegalArgumentException("Source URL not allowed"))
+            }
             conn = URL("$baseUrl/search").openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.connectTimeout = 30000
             conn.readTimeout = 30000
-            conn.setRequestProperty("Content-Type", "application/json")
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             conn.doOutput = true
-            conn.outputStream.use { it.write(json.encodeToString(request).toByteArray()) }
+            conn.outputStream.use { it.write(json.encodeToString(request).toByteArray(StandardCharsets.UTF_8)) }
 
             if (conn.responseCode != 200) {
-                return@withContext Result.failure(Exception("HTTP ${conn.responseCode}"))
+                val errorBody = readErrorBody(conn)
+                return@withContext Result.failure(CoreHttpException(conn.responseCode, errorBody))
             }
             val body = readBounded(conn)
             Result.success(json.decodeFromString<CoreSearchResponse>(body))
@@ -91,8 +101,27 @@ class CoreHttpClient {
         while (stream.read(buffer).also { read = it } != -1) {
             total += read
             if (total > maxResponseSize) throw IllegalStateException("Response too large")
-            result.append(String(buffer, 0, read))
+            result.append(String(buffer, 0, read, StandardCharsets.UTF_8))
         }
         return result.toString()
     }
+
+    private fun readErrorBody(conn: HttpURLConnection): String {
+        return try {
+            val stream = conn.errorStream ?: return ""
+            val buffer = ByteArray(4096)
+            val result = StringBuilder()
+            var total = 0
+            var read: Int
+            while (stream.read(buffer).also { read = it } != -1 && total < 4096) {
+                total += read
+                result.append(String(buffer, 0, read, StandardCharsets.UTF_8))
+            }
+            result.toString()
+        } catch (e: Exception) {
+            ""
+        }
+    }
 }
+
+class CoreHttpException(val statusCode: Int, val errorBody: String) : Exception("HTTP $statusCode: $errorBody")
