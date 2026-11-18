@@ -400,6 +400,49 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+
+  debug-build:
+    name: Debug APK (Test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Use CI Gradle properties
+        run: mkdir -p ~/.gradle && cp .github/ci-gradle.properties ~/.gradle/gradle.properties
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleGithubDebug --build-cache --stacktrace
+
+      - name: Rename debug APK
+        run: |
+          mkdir -p dist-debug
+          cp app/build/outputs/apk/github/debug/app-github-debug.apk dist-debug/goonhub-debug-arm64.apk
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: goonhub-debug-arm64
+          path: dist-debug/goonhub-debug-arm64.apk
+          if-no-files-found: error
+          retention-days: 7
+
   # A rolling prerelease under the tag "nightly". GitHub's "latest release"
   # never includes a prerelease, so stable builds never see it; nightly
   # builds read it by tag (UpdateRepository).
